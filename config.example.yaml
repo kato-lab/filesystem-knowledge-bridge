@@ -1,0 +1,34 @@
+knowledge:
+  root: /knowledge
+
+qdrant:
+  host: qdrant
+  port: 6333
+  collection: lab_knowledge
+
+embedding:
+  model: BAAI/bge-m3
+
+chunking:
+  chunk_size: 1024
+  chunk_overlap: 128
+
+search:
+  similarity_top_k: 5
+
+metadata_rules:
+  - pattern: "projects/{project}/experiments/{date}.md"
+    metadata:
+      type: experiment_log
+      project: "{project}"
+      date: "{date}"
+
+  - pattern: "projects/{project}/README.md"
+    metadata:
+      type: project_readme
+      project: "{project}"
+
+  - pattern: "manuals/{device}.md"
+    metadata:
+      type: manual
+      device: "{device}"

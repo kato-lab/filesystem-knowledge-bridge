@@ -1,0 +1,49 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: fkb-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+
+  indexer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fkb-indexer
+    env_file:
+      - .env
+    volumes:
+      - ./knowledge:/knowledge:ro
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      - qdrant
+    command: ["python", "-m", "fkb.indexer"]
+
+  search:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./knowledge:/knowledge:ro
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      - qdrant
+    entrypoint: ["python", "-m", "fkb.search"]
+
+  mcp:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fkb-mcp
+    env_file:
+      - .env
+    volumes:
+      - ./knowledge:/knowledge:ro
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      - qdrant
+    command: ["python", "-m", "fkb.mcp_server"]

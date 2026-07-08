@@ -1,0 +1,23 @@
+[project]
+name = "filesystem-knowledge-bridge"
+version = "0.1.0"
+description = "Path-aware filesystem knowledge bridge for Qdrant, LlamaIndex, and MCP."
+requires-python = ">=3.11"
+dependencies = [
+    "llama-index>=0.12.0",
+    "llama-index-vector-stores-qdrant>=0.4.0",
+    "llama-index-embeddings-huggingface>=0.5.0",
+    "qdrant-client>=1.12.0",
+    "sentence-transformers>=3.0.0",
+    "fastmcp>=2.0.0",
+    "pyyaml>=6.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+fkb-index = "fkb.indexer:main"
+fkb-search = "fkb.search:main"
+fkb-mcp = "fkb.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

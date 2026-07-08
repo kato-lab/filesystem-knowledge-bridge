@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+config.yaml
+qdrant_storage/
+.venv/
+.DS_Store
