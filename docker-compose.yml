@@ -11,7 +11,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    container_name: fkb-indexer
     env_file:
       - .env
     volumes:
@@ -47,3 +46,26 @@ services:
     depends_on:
       - qdrant
     command: ["python", "-m", "fkb.mcp_server"]
+
+  admin:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: fkb-admin
+    env_file:
+      - .env
+    volumes:
+      - ./knowledge:/knowledge:ro
+      - ./config.yaml:/app/config.yaml:ro
+      # Laboratory mode example:
+      # - type: bind
+      #   source: /home
+      #   target: /host_home
+      #   read_only: true
+      #   bind:
+      #     propagation: rslave
+    ports:
+      - "8080:8080"
+    depends_on:
+      - qdrant
+    command: ["uvicorn", "fkb.admin:app", "--host", "0.0.0.0", "--port", "8080"]

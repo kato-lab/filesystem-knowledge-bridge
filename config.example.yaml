@@ -1,5 +1,12 @@
 knowledge:
+  mode: simple
   root: /knowledge
+  owner: default
+  # laboratory mode example
+  # mode: home
+  # home_root: /host_home
+  # knowledge_dir_name: knowledge
+  # shared_owner: share
 
 qdrant:
   host: qdrant
@@ -16,18 +23,20 @@ chunking:
 search:
   similarity_top_k: 5
 
+admin:
+  username_header: x-authentik-username
+  allow_header_auth: true
+
 metadata_rules:
   - pattern: "projects/{project}/experiments/{date}.md"
     metadata:
       type: experiment_log
       project: "{project}"
       date: "{date}"
-
   - pattern: "projects/{project}/README.md"
     metadata:
       type: project_readme
       project: "{project}"
-
   - pattern: "manuals/{device}.md"
     metadata:
       type: manual

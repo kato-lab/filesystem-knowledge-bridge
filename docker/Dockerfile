@@ -1,12 +1,10 @@
 FROM python:3.12-slim
-
 WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends     build-essential     curl     git     && rm -rf /var/lib/apt/lists/*
-
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl git \
+    && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml /app/
 COPY src /app/src
-
-RUN pip install --no-cache-dir -U pip &&     pip install --no-cache-dir -e .
-
+RUN pip install --no-cache-dir -U pip && pip install --no-cache-dir -e .
 ENV PYTHONUNBUFFERED=1
+ENV FKB_CONFIG=/app/config.yaml

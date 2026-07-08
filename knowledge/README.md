@@ -1,5 +1,9 @@
 # Knowledge folder
 
-Place your laboratory documents here.
+Simple mode uses this folder.
 
-This folder is mounted into the container as `/knowledge`.
+For laboratory mode, use:
+
+```text
+/home/<user>/knowledge
+```

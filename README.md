@@ -1,45 +1,58 @@
 # filesystem-knowledge-bridge
 
-A small example project for building a filesystem-based AI knowledge layer.
+既存のフォルダ構造をそのままAI Knowledgeとして使うための小さなBridge実装です。
 
-This repository accompanies an article series about building a laboratory AI infrastructure with OpenWebUI + LiteLLM.
+このリポジトリは、OpenWebUI + LiteLLM による研究室AI基盤の記事シリーズの補助実装として作成しています。
 
-The goal is not to replace existing RAG platforms. The goal is to keep your existing folder structure as the source of truth and expose it to AI tools through MCP.
+目的は、新しいRAGチャットアプリを作ることではありません。既存のファイルスペースをKnowledgeの本体として残し、Qdrant / LlamaIndex / MCP を使ってAIから参照できるようにすることです。
 
 ## Concept
 
 ```text
-Existing filesystem
-  knowledge/
-    projects/
-    thesis/
-    manuals/
+/home/<user>/knowledge
+/home/share/knowledge
+または
+./knowledge
+
         ↓
-Path-aware indexer
+
+filesystem-knowledge-bridge
+
         ↓
-Qdrant
+
+Qdrant + LlamaIndex
+
         ↓
-MCP server
+
+MCP Server
+
         ↓
-OpenWebUI / VSCode Agent / Cursor / other MCP clients
+
+OpenWebUI / VSCode Agent / Cursor
 ```
 
-## What this project does
+## 作るもの・作らないもの
 
-- Recursively reads a local folder
-- Keeps relative file paths as metadata
-- Indexes documents into Qdrant
-- Provides a simple search command
-- Provides an MCP server for AI tools
+### 作るもの
 
-## What this project does not do
+- フォルダを再帰的に読み込むindexer
+- ファイルパスをmetadataとして保持する仕組み
+- Qdrantへの登録
+- 検索確認コマンド
+- MCP Server
+- 最小限のKnowledge Admin API
 
-- It is not a chat UI
-- It is not an LLM gateway
-- It is not a full document management system
-- It does not replace OpenWebUI, LiteLLM, Qdrant, or LlamaIndex
+### 作らないもの
 
-## Quick start
+- Chat UI
+- LLM Gateway
+- Vector DBそのもの
+- Agentそのもの
+- 本格的なDMS
+
+## Quick start: simple mode
+
+まずはリポジトリ内の `knowledge/` を使って試します。
 
 ```bash
 cp .env.example .env
@@ -60,48 +73,78 @@ Qdrant dashboard:
 http://localhost:6333/dashboard
 ```
 
-## Directory structure
+## Laboratory mode: /home/<user>/knowledge
+
+研究室運用では、各ユーザのホームディレクトリにKnowledgeフォルダを置くことを想定しています。
 
 ```text
-filesystem-knowledge-bridge/
-├── docker-compose.yml
-├── config.example.yaml
-├── .env.example
-├── knowledge/
-│   ├── projects/
-│   └── manuals/
-├── src/
-│   └── fkb/
-│       ├── config.py
-│       ├── metadata.py
-│       ├── rag_core.py
-│       ├── indexer.py
-│       ├── search.py
-│       └── mcp_server.py
-└── docs/
+/home/alice/knowledge
+/home/bob/knowledge
+/home/share/knowledge
 ```
 
-## Path-aware metadata
+`/home/<user>` が autofs + NFS の場合は、Docker bind mount に mount propagation が必要になることがあります。
 
-For a file such as:
+```yaml
+volumes:
+  - type: bind
+    source: /home
+    target: /host_home
+    read_only: true
+    bind:
+      propagation: rslave
+```
+
+コンテナ内では以下のように見えます。
+
+```text
+/host_home/alice/knowledge
+/host_home/bob/knowledge
+/host_home/share/knowledge
+```
+
+## SSO / reverse proxy integration
+
+本アプリはユーザ管理を作り込みません。
+
+本番運用では、authentik などのSSOとリバースプロキシを前段に置き、認証済みユーザ名をHTTPヘッダで渡す構成を想定しています。
+
+```text
+browser
+  ↓
+authentik
+  ↓
+reverse proxy
+  ↓
+X-authentik-username: alice
+  ↓
+knowledge-admin
+  ↓
+/host_home/alice/knowledge を更新
+```
+
+詳細は `docs/sso.md` を参照してください。
+
+## Metadata
+
+例:
 
 ```text
 knowledge/projects/sample_project/experiments/2026-07-08.md
 ```
 
-this project stores metadata like:
+は、以下のようなmetadataとして登録されます。
 
 ```json
 {
   "source_path": "projects/sample_project/experiments/2026-07-08.md",
   "top_dir": "projects",
   "project": "sample_project",
-  "filename": "2026-07-08.md"
+  "type": "experiment_log",
+  "owner": "default"
 }
 ```
 
-The exact metadata extraction rules can be customized in `config.yaml`.
+## Status
 
-## Notes
-
-This is an intentionally small bridge layer. The first target is to make the folder structure visible to AI tools without forcing users to move all documents into an application-specific knowledge base.
+Experimental. まずは「記事の補助コード」として小さく公開する想定です。

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from string import Formatter
 from typing import Any
 
 from .config import MetadataRule
@@ -10,22 +9,19 @@ from .config import MetadataRule
 def _match_part(pattern_part: str, value: str) -> dict[str, str] | None:
     if "{" not in pattern_part:
         return {} if pattern_part == value else None
-
     before = pattern_part.split("{", 1)[0]
-    field_and_after = pattern_part.split("{", 1)[1]
-    field_name, after = field_and_after.split("}", 1)
-
+    field = pattern_part.split("{", 1)[1].split("}", 1)[0]
+    after = pattern_part.split("}", 1)[1]
     if before and not value.startswith(before):
         return None
     if after and not value.endswith(after):
         return None
-
     start = len(before)
     end = len(value) - len(after) if after else len(value)
     captured = value[start:end]
     if not captured:
         return None
-    return {field_name: captured}
+    return {field: captured}
 
 
 def match_rule(rel_path: str, rule: MetadataRule) -> dict[str, str] | None:
@@ -33,14 +29,12 @@ def match_rule(rel_path: str, rule: MetadataRule) -> dict[str, str] | None:
     path_parts = rel_path.strip("/").split("/")
     if len(pattern_parts) != len(path_parts):
         return None
-
     values: dict[str, str] = {}
     for p, v in zip(pattern_parts, path_parts):
         matched = _match_part(p, v)
         if matched is None:
             return None
         values.update(matched)
-
     metadata: dict[str, str] = {}
     for k, template in rule.metadata.items():
         try:
@@ -50,10 +44,11 @@ def match_rule(rel_path: str, rule: MetadataRule) -> dict[str, str] | None:
     return metadata
 
 
-def build_metadata(abs_path: Path, knowledge_root: Path, rules: list[MetadataRule]) -> dict[str, Any]:
+def build_metadata(abs_path: Path, knowledge_root: Path, owner: str, rules: list[MetadataRule]) -> dict[str, Any]:
     rel_path = abs_path.relative_to(knowledge_root).as_posix()
     parts = rel_path.split("/")
     metadata: dict[str, Any] = {
+        "owner": owner,
         "source_path": rel_path,
         "filename": abs_path.name,
         "extension": abs_path.suffix.lower(),
