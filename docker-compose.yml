@@ -157,9 +157,7 @@ tei:
 
   container_name: tei
 
-  command:
-    - --model-id
-    - BAAI/bge-m3
+    command: --model-id BAAI/bge-m3 --max-batch-tokens 4096 --max-client-batch-size 16 --auto-truncate
 
   ports:
     - "8081:80"
@@ -168,7 +166,14 @@ tei:
     - hf_cache:/data
 
   restart: unless-stopped
-
+    # ======= ↓ GPUを認識させるために必須の記述 ↓ =======
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 # ===========================================================================
 # Docker Composeのボリューム定義
 # qdrant_data: Qdrantの永続化データ
@@ -177,4 +182,3 @@ tei:
 volumes:
   qdrant_data:
   hf_cache:
-  

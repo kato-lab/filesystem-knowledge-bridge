@@ -12,9 +12,10 @@ from typing import Iterable
 from qdrant_client import QdrantClient
 from llama_index.core import Document, Settings, StorageContext, VectorStoreIndex
 from llama_index.core.node_parser import CodeSplitter, MarkdownNodeParser, SentenceSplitter
-from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.embeddings.openai_like import OpenAILikeEmbedding
 from llama_index.readers.file import DocxReader, PDFReader, PptxReader
 from llama_index.vector_stores.qdrant import QdrantVectorStore
+from uuid import NAMESPACE_URL, uuid5
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY") or None
@@ -158,12 +159,16 @@ def parse_file(path: Path):
 def configure_embedding() -> None:
     if not LITELLM_API_KEY:
         raise RuntimeError("LITELLM_API_KEYが未設定です")
-    Settings.embed_model = OpenAIEmbedding(
-        model=EMBEDDING_MODEL,
+
+    Settings.embed_model = OpenAILikeEmbedding(
+        model_name=EMBEDDING_MODEL,
         api_base=LITELLM_API_BASE,
         api_key=LITELLM_API_KEY,
+        embed_batch_size=10,
+        additional_kwargs={
+            "encoding_format": "float",
+        },
     )
-
 # -----------------------------------------------------------------------
 # Node building function that processes files and generates nodes with metadata.
 # -----------------------------------------------------------------------
@@ -181,7 +186,16 @@ def build_nodes(target_dir: Path, project_id: str, project_name: str, shared: bo
         for index, node in enumerate(nodes):
             node.metadata.update(metadata)
             node.metadata["chunk_index"] = index
-            node.id_ = f"{'shared' if shared else owner}:{project_id}:{relative_path}:{index}"
+
+            logical_id = (
+                f"{'shared' if shared else owner}:"
+                f"{project_id}:"
+                f"{relative_path}:"
+                f"{index}"
+            )
+
+            node.metadata["logical_id"] = logical_id
+            node.id_ = str(uuid5(NAMESPACE_URL, logical_id))
         final_nodes.extend(nodes)
         print(f"   └─ {len(nodes)} node")
     return final_nodes

@@ -122,8 +122,7 @@ docker compose run --rm indexer \
   --project-id sample-project
 ```
 
-標準Composeでは `./examples` を `/knowledge` にread-onlyでマウントしています。
-本番ではKnowledge専用領域を用意してbind元を変更してください。
+標準Composeでは `./examples` を `/knowledge` にread-onlyでマウントしています。indexerをホストのコマンドとして実行する場合には不要ですが、dockerから起動する場合は必要です。本番ではKnowledge専用領域を用意してbind元を変更してください。
 
 また、ファイルサーバ上にNFSでknowledge領域を用意した場合は、knowledge領域全体を静的マウントしてbindします。例えば/mnt/ai-knowledgeにマウントした場合、docker のbind mountは次のようになります。
 
@@ -215,6 +214,8 @@ RAGで対象ファイルを探し、より詳しい解析が必要なら、Works
 現在、登録したナレッジをAIから使う方法は、OpenWebUIの External Knowledge Source機能を使います。OpenWebUIのチャット以外（Agentなど）から使う場合は、OpenWebUIのAPIキー経由でカスタムモデルを参照して利用します。
 
 将来的には小さなMCPサーバーを開発し、エージェントへのナレッジの提供や、プロジェクトが増えた時の登録やプロジェクト単位のフィルタリングなどを担当する予定です。
+
+
 
 ## Status
 Experimental / MIT License
