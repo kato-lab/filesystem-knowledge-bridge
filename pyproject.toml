@@ -1,25 +1,23 @@
 [project]
 name = "filesystem-knowledge-bridge"
 version = "0.1.0"
-description = "Path-aware filesystem knowledge bridge for Qdrant, LlamaIndex, and MCP."
+description = "Structure-preserving project Knowledge indexer for LlamaIndex, LiteLLM, and Qdrant"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn>=0.30.0",
-    "llama-index>=0.12.0",
-    "llama-index-vector-stores-qdrant>=0.4.0",
-    "llama-index-embeddings-huggingface>=0.5.0",
-    "qdrant-client>=1.12.0",
-    "sentence-transformers>=3.0.0",
-    "fastmcp>=2.0.0",
-    "pyyaml>=6.0.0",
-    "pydantic>=2.0.0",
+    "qdrant-client>=1.14",
+    "llama-index-core>=0.12",
+    "llama-index-vector-stores-qdrant>=0.4",
+    "llama-index-readers-file>=0.4",
+    "llama-index-embeddings-openai>=0.3",
+    "tree-sitter-language-pack>=0.8",
+    "pypdf>=5",
+    "python-pptx>=1.0",
+    "docx2txt>=0.8",
 ]
 
 [project.scripts]
-fkb-index = "fkb.indexer:main"
-fkb-search = "fkb.search:main"
-fkb-mcp = "fkb.mcp_server:main"
+kb-index = "kb_index:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+py-modules = ["kb_index"]
+package-dir = {"" = "src"}

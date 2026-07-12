@@ -1,71 +1,180 @@
 services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: fkb-qdrant
-    ports:
-      - "6333:6333"
-    volumes:
-      - ./qdrant_storage:/qdrant/storage
+  # ===========================================================================
+  # Open WebUI
+  # ===========================================================================
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.10.2
+    container_name: open-webui
 
+    ports:
+      - "${OPENWEBUI_PORT:-3000}:8080"
+
+    volumes:
+      - ./open-webui:/app/backend/data
+
+    environment:
+      # -----------------------------------------------------------------------
+      # OpenWebUIからLiteLLMへ接続
+      # -----------------------------------------------------------------------
+      OPENAI_API_BASE_URL: ${LITELLM_API_BASE}
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+
+      # -----------------------------------------------------------------------
+      # OpenWebUIからナレッジを利用するための設定。RAG検索クエリのEmbeddingをLiteLLMへ委譲する
+      # -----------------------------------------------------------------------
+      # RAG検索クエリのEmbedding
+      # 検索クエリとインデックスのEmbeddingモデルは同じである必要があるため、
+      # .envでは基盤共通名のEMBEDDING_MODELを使い、
+      # OpenWebUIが要求するRAG_EMBEDDING_MODELへ割り当てる
+      # Indexerでも同じEMBEDDING_MODELを参照する
+      # -----------------------------------------------------------------------
+      RAG_EMBEDDING_ENGINE: openai
+      RAG_OPENAI_API_BASE_URL: ${LITELLM_API_BASE}
+      RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+      RAG_EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+
+      # -----------------------------------------------------------------------
+      # OpenWebUI本体
+      # -----------------------------------------------------------------------
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+
+      # -----------------------------------------------------------------------
+      # RAG検索設定
+      # -----------------------------------------------------------------------
+      RAG_TOP_K: ${RAG_TOP_K:-5}
+
+      # -----------------------------------------------------------------------
+      # OpenWebUI自身が作る通常Knowledge（Ad-hoc）もQdrantへ保存する場合だけ有効化
+      #
+      # External Knowledge Sourcesから本ツールで登録したCollectionを読むだけなら不要
+      # -----------------------------------------------------------------------
+      # VECTOR_DB: qdrant
+      # QDRANT_URI: ${QDRANT_URL}
+      # QDRANT_API_KEY: ${QDRANT_API_KEY}
+
+    depends_on:
+      - litellm
+      - qdrant
+
+    restart: unless-stopped
+
+
+  # ===========================================================================
+  # LiteLLM
+  # ===========================================================================
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+
+    command:
+      - "--config=/app/config.yaml"
+
+    # Provider APIキーを含め、LiteLLMが利用する値をまとめて渡す
+    env_file:
+      - .env
+
+    restart: unless-stopped
+
+
+  # ===========================================================================
+  # Qdrant
+  # ===========================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.17.0
+    container_name: qdrant
+
+    ports:
+      # ホスト側からkb_index.pyやDashboardへ接続するため公開
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+
+      # gRPC。現時点で不要なら削除してもよい
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+    restart: unless-stopped
+
+
+  # ===========================================================================
+  # Indexer
+  # Indexerはホストのコマンドでも動作するが、インストールの手間を省くためにコンテナ化
+  # 常駐サービスではなく、必要なときだけdocker compose runで実行する
+  # ===========================================================================
   indexer:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    env_file:
-      - .env
-    volumes:
-      - ./knowledge:/knowledge:ro
-      - ./config.yaml:/app/config.yaml:ro
-    depends_on:
-      - qdrant
-    command: ["python", "-m", "fkb.indexer"]
 
-  search:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    env_file:
-      - .env
-    volumes:
-      - ./knowledge:/knowledge:ro
-      - ./config.yaml:/app/config.yaml:ro
-    depends_on:
-      - qdrant
-    entrypoint: ["python", "-m", "fkb.search"]
+    profiles:
+      - tools
 
-  mcp:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    container_name: fkb-mcp
-    env_file:
-      - .env
-    volumes:
-      - ./knowledge:/knowledge:ro
-      - ./config.yaml:/app/config.yaml:ro
-    depends_on:
-      - qdrant
-    command: ["python", "-m", "fkb.mcp_server"]
+    environment:
+      # Qdrant接続
+      QDRANT_URL: ${QDRANT_URL}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
 
-  admin:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    container_name: fkb-admin
-    env_file:
-      - .env
+      # LiteLLM経由でEmbeddingを計算
+      LITELLM_API_BASE: ${LITELLM_API_BASE}
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
+
+      # OpenWebUIと共通のEmbeddingモデル
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+
+      # payloadへ記録する論理パス
+      KNOWLEDGE_LOGICAL_ROOT: ${KNOWLEDGE_LOGICAL_ROOT:-labknowledge://}
+
     volumes:
-      - ./knowledge:/knowledge:ro
-      - ./config.yaml:/app/config.yaml:ro
-      # Laboratory mode example:
-      # - type: bind
-      #   source: /home
-      #   target: /host_home
-      #   read_only: true
-      #   bind:
-      #     propagation: rslave
-    ports:
-      - "8080:8080"
+      # フリーズ済みプロジェクトの配置先
+      - ./examples:/knowledge:ro
+
     depends_on:
       - qdrant
-    command: ["uvicorn", "fkb.admin:app", "--host", "0.0.0.0", "--port", "8080"]
+      - litellm
+
+    entrypoint:
+      - kb-index
+
+# ===========================================================================
+# HuggingFace Text Embeddings Inference
+# Indexer,RAG検索で使うEmdeddingモデルとして使う。
+# 他のEmbeddingモデルを使う場合はこのサービスを入れ替える
+# または外部のEmbeddingサービスを使う場合はこのサービスを削除する
+# EmbeddingモデルをLiteLLM経由で使う場合、LiteLLMのconfig.yamlに
+#   embedding:
+#     provider: huggingface
+# を追記する必要がある
+# ===========================================================================
+tei:
+  image: ghcr.io/huggingface/text-embeddings-inference:1.8
+
+  container_name: tei
+
+  command:
+    - --model-id
+    - BAAI/bge-m3
+
+  ports:
+    - "8081:80"
+
+  volumes:
+    - hf_cache:/data
+
+  restart: unless-stopped
+
+# ===========================================================================
+# Docker Composeのボリューム定義
+# qdrant_data: Qdrantの永続化データ
+# hf_cache: HuggingFaceのキャッシュ
+# ===========================================================================
+volumes:
+  qdrant_data:
+  hf_cache:
+  

@@ -1,1 +1,0 @@
-"""filesystem-knowledge-bridge."""
