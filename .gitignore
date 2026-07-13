@@ -1,7 +1,35 @@
+
+# Python
 __pycache__/
-*.pyc
-.env
-config.yaml
-qdrant_storage/
+*.py[cod]
+*.so
+
+# Virtual Environment
 .venv/
+venv/
+
+# uv
+uv.lock
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
 .DS_Store
+
+# Logs
+*.log
+＃ Environment
+.env
+qdrant_storage/
