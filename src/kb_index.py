@@ -195,6 +195,17 @@ def build_nodes(target_dir: Path, project_id: str, project_name: str, shared: bo
             )
 
             node.metadata["logical_id"] = logical_id
+
+            node.metadata["text"] = node.get_content()
+            node.metadata["metadata"] = {
+                **metadata,
+                "chunk_index": index,
+                "logical_id": logical_id,
+            }
+
+            node.excluded_embed_metadata_keys.extend(["text", "metadata"])
+            node.excluded_llm_metadata_keys.extend(["text", "metadata"])
+
             node.id_ = str(uuid5(NAMESPACE_URL, logical_id))
         final_nodes.extend(nodes)
         print(f"   └─ {len(nodes)} node")

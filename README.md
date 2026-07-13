@@ -1,221 +1,450 @@
 # filesystem-knowledge-bridge
 
-整理・フリーズ済みのプロジェクトフォルダを、**階層構造と相対パスを保ったままQdrantへ登録**して、ナレッジとして扱う補助リポジトリです。
+A lightweight indexing tool for registering frozen project folders as Qdrant collections and using them from Open WebUI through External Knowledge Sources.
 
-このプロジェクトは、プロジェクトフォルダをQdrantに登録するためのindexserのみの構成で、Knowledgeサーバを新しく作るものではありません。
-他の部分は、次のような既存のOSSを組み合わせるdropcatとを想定しています。
+> Keep the architecture simple: reuse existing RAG components and customize only the indexing step.
 
-- Chat UI: Open WebUI
-- LLM / Embedding gateway: LiteLLM
-- Vector DB: Qdrant
-- 構造保持型インデックス作成: 本リポジトリ
+Japanese documentation: [README.ja.md](README.ja.md)
 
-## コンセプト
+## Overview
 
 ```text
-生きたプロジェクト
-  - 日々更新される
-  - 未整理のメモや失敗コードを含む
-  - Workspace Agentが直接参照する
-
-        ↓ 整理・再現確認・freeze
-
-Curated Knowledge Space
-  - 共有または個人用として公開してよい
-  - プロジェクトとしてフリーズしている
-  - 引き継ぎ・再利用可能
-  - フォルダ構造を維持する
-
-        ↓ kb-index（非常駐）
-
-Qdrant
-  - project単位のcollection
-  - nodeごとにrelative_path / logical_pathを保持
-
-        ↓
-
-Open WebUI / Agent
+Frozen project folder
+        │
+        ▼
+     kb-index
+        │
+        ├── LiteLLM ── TEI / BGE-M3
+        │
+        ▼
+      Qdrant
+        │
+        ▼
+Open WebUI External Knowledge Sources
 ```
 
-## このリポジトリが解決すること
+The project does not provide a custom search server. Open WebUI searches the Qdrant collection directly.
 
-- 別フォルダの同名ファイルを相対パスで区別する
-- Markdownの見出し構造を維持して分割する
-- ソースコードを構文単位で分割する
-- PDF / DOCX / PPTXを形式別Readerで読み込む
-- 全nodeへproject・owner・相対パスを付与する
-- project単位でQdrant collectionを全置換する
-- LiteLLM Proxy経由でEmbeddingを生成する
+## Features
 
-## 解決しないこと
+- Preserves project and relative path metadata
+- Creates one Qdrant collection per project by default
+- Supports shared and personal knowledge
+- Supports Markdown, source code, plain text, PDF, DOCX, and PPTX
+- Uses file-type-specific chunking
+- Generates embeddings through an OpenAI-compatible LiteLLM endpoint
+- Stores Open WebUI-compatible `text` and `metadata` payload fields
+- Replaces an existing collection when re-indexing
+- Provides a host-side CLI and an optional containerized execution path
 
-- 生きたプロジェクトの常時監視
-- 自動差分同期
-- 独自Chat UI
-- 独自ユーザ管理
-- 独自RAG回答生成
-- 原本ファイルの編集
+## Requirements
 
-## Quick start
+- Linux or macOS
+- Python 3.11 or later
+- [uv](https://docs.astral.sh/uv/)
+- Docker and Docker Compose
+- Open WebUI 0.10.2 or later
+- LiteLLM Proxy
+- Qdrant
+- An embedding backend such as TEI with `BAAI/bge-m3`
 
-### 1. 設定
+# 1. Install `kb-index`
+
+## 1.1 Local user installation
 
 ```bash
-cp .env.example .env
+uv tool install .
 ```
 
-`.env`を環境に合わせて編集します。
+The executable is normally placed under:
 
-### 2. Qdrantを起動
+```text
+~/.local/bin/kb-index
+```
 
-既存Qdrantを使う場合は不要です。
+Ensure that `~/.local/bin` is in `PATH`, then check:
 
 ```bash
-docker compose up -d qdrant
+kb-index --help
 ```
 
-### 3. Python環境を作成
+To reinstall after changing the source:
 
 ```bash
-uv sync
+uv tool install --force .
 ```
 
-### 4. dry-run
+During development, you can also run it without installing:
 
 ```bash
-set -a
-source .env
-set +a
-
-uv run kb-index examples/sample_project \
-  --shared \
-  --project-id sample-project \
-  --dry-run
+uv run src/kb_index.py --shared examples
 ```
 
-### 5. 登録
+or, when the project script entry is configured:
 
 ```bash
-uv run kb-index examples/sample_project \
-  --shared \
-  --project-id sample-project
+uv run kb-index --shared examples
 ```
 
-個人Knowledgeの場合:
+## 1.2 System-wide installation
+
+Build the wheel as a normal user first:
 
 ```bash
-uv run kb-index /mnt/ai-knowledge/users/alice/floor-map \
-  --owner alice \
-  --project-id floor-map
+rm -rf build dist src/*.egg-info
+uv build
 ```
 
-## Dockerでindexerを実行する
-
-Python環境をホストへ入れたくない場合:
+Install the wheel for all users:
 
 ```bash
-docker compose build indexer
+sudo mkdir -p /opt/uv-tools /usr/local/bin
 
-docker compose run --rm indexer \
-  /knowledge/shared/sample-project \
-  --shared \
-  --project-id sample-project
+sudo env \
+  UV_TOOL_DIR=/opt/uv-tools \
+  UV_TOOL_BIN_DIR=/usr/local/bin \
+  uv tool install --force dist/*.whl
 ```
 
-標準Composeでは `./examples` を `/knowledge` にread-onlyでマウントしています。indexerをホストのコマンドとして実行する場合には不要ですが、dockerから起動する場合は必要です。本番ではKnowledge専用領域を用意してbind元を変更してください。
+Check the installation:
 
-また、ファイルサーバ上にNFSでknowledge領域を用意した場合は、knowledge領域全体を静的マウントしてbindします。例えば/mnt/ai-knowledgeにマウントした場合、docker のbind mountは次のようになります。
+```bash
+which kb-index
+kb-index --help
+```
+
+Expected executable path:
+
+```text
+/usr/local/bin/kb-index
+```
+
+To uninstall:
+
+```bash
+sudo env \
+  UV_TOOL_DIR=/opt/uv-tools \
+  UV_TOOL_BIN_DIR=/usr/local/bin \
+  uv tool uninstall filesystem-knowledge-bridge
+```
+
+The uninstall name is the package name from `pyproject.toml`, not necessarily the executable name.
+
+# 2. Configure the CLI
+
+`kb-index` reads the following environment variables:
+
+```dotenv
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+
+LITELLM_API_BASE=http://localhost:4000/v1
+LITELLM_API_KEY=your-litellm-key
+EMBEDDING_MODEL=lab-embedding
+
+KNOWLEDGE_LOGICAL_ROOT=labknowledge://
+```
+
+When LiteLLM authentication uses one master key, set:
+
+```bash
+export LITELLM_API_KEY="$LITELLM_MASTER_KEY"
+```
+
+The host-side CLI must be able to reach both LiteLLM and Qdrant.
+
+## Basic usage
+
+```bash
+kb-index --shared /path/to/project
+kb-index /path/to/project
+kb-index --owner alice /path/to/project
+kb-index --project-id stable-project-id /path/to/project
+kb-index --collection curated_project /path/to/project
+kb-index --shared --dry-run /path/to/project
+```
+
+Default collection names:
+
+```text
+shared_<project-id>
+private_<owner>_<project-id>
+```
+
+# 3. Build the complete system
+
+The minimal runtime system consists of Open WebUI, LiteLLM, Qdrant, and TEI with BGE-M3. The indexer itself does not need to run continuously.
+
+## 3.1 `.env`
+
+```dotenv
+COMPOSE_PROJECT_NAME=lab-ai
+
+OPENWEBUI_PORT=3000
+WEBUI_SECRET_KEY=replace-with-a-long-random-secret
+ENABLE_SIGNUP=true
+RAG_TOP_K=5
+
+LITELLM_PORT=4000
+LITELLM_MASTER_KEY=replace-with-a-strong-key
+
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+ANTHROPIC_API_KEY=
+
+EMBEDDING_MODEL=lab-embedding
+
+QDRANT_HTTP_PORT=6333
+QDRANT_API_KEY=
+
+KNOWLEDGE_LOGICAL_ROOT=labknowledge://
+```
+
+Do not commit `.env`.
+
+```gitignore
+.env
+open-webui/
+```
+
+## 3.2 `docker-compose.yml`
 
 ```yaml
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.10.2
+    container_name: open-webui
+    ports:
+      - "${OPENWEBUI_PORT:-3000}:8080"
+    volumes:
+      - ./open-webui:/app/backend/data
+    environment:
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+
+      RAG_EMBEDDING_ENGINE: openai
+      RAG_OPENAI_API_BASE_URL: http://litellm:4000/v1
+      RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+      RAG_EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      RAG_TOP_K: ${RAG_TOP_K:-5}
+
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+    depends_on:
+      - litellm
+      - qdrant
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    env_file:
+      - .env
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command:
+      - "--config=/app/config.yaml"
+    ports:
+      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
+    restart: unless-stopped
+
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:latest
+    container_name: tei
+    command:
+      - --model-id
+      - BAAI/bge-m3
+    volumes:
+      - hf_cache:/data
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.17.0
+    container_name: qdrant
+    ports:
+      - "127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
 volumes:
-  - /mnt/ai-knowledge:/knowledge:ro
+  qdrant_data:
+  hf_cache:
 ```
 
-## Knowledge Spaceの構成例
+Only Open WebUI needs to be exposed to users. LiteLLM and Qdrant are bound to localhost above only so that the host-side `kb-index` command can reach them. TEI is not exposed.
 
-```text
-/mnt/ai-knowledge/
-├── shared/          #共有ナレッジスペース
-│   ├── manuals/
-│   └── projects/
-└── users/           #ユーザごとの個人ナレッジスペース
-    ├── alice/       #ユーザaliceのナレッジスペース
-    └── bob/         #ユーザbobのナレッジスペース
+## 3.3 LiteLLM `config.yaml`
+
+```yaml
+model_list:
+  - model_name: lab-embedding
+    litellm_params:
+      model: openai/BAAI/bge-m3
+      api_base: http://tei:80/v1
+      api_key: dummy
+      mode: embedding
+      encoding_format: float
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
 ```
 
-ホームディレクトリ(`/home`)全体をコンテナへbindする構成は推奨しません。読み取り専用でも、SSH鍵や通常作業ファイルまでコンテナから見えるのでセキュリティ上のリスクとなるためです。ナレッジスペースは別途専用領域を用意しましょう。その上で各ユーザナレッジスペースをautofsでマウントし、ホームディレクトリから ln -s /knowledge/users/alice /home/alice/knowledgeのようにシンボリックリンクを貼ると利便性もあがります。
+Add chat models to the same `model_list` as needed.
 
-## Metadata
+## 3.4 Start and verify
 
-各nodeには最低限、次のmetadataを付与します。
+```bash
+docker compose up -d
+docker compose ps
+```
+
+```bash
+curl http://localhost:4000/v1/models \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+```
+
+```bash
+curl http://localhost:4000/v1/embeddings \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "lab-embedding",
+    "input": "test embedding",
+    "encoding_format": "float"
+  }'
+```
+
+```bash
+curl http://localhost:6333/collections
+```
+
+# 4. Register a project
+
+```bash
+export QDRANT_URL=http://localhost:6333
+export LITELLM_API_BASE=http://localhost:4000/v1
+export LITELLM_API_KEY="$LITELLM_MASTER_KEY"
+export EMBEDDING_MODEL=lab-embedding
+
+kb-index --shared examples
+```
+
+The command scans supported files, chunks them, generates embeddings through LiteLLM, recreates the target collection, and stores Open WebUI-compatible payload fields.
+
+Inspect one point:
+
+```bash
+curl http://localhost:6333/collections/shared_examples/points/scroll \
+  -H "Content-Type: application/json" \
+  -d '{
+    "limit": 1,
+    "with_payload": true,
+    "with_vector": false
+  }'
+```
+
+Expected fields:
 
 ```json
 {
-  "scope": "shared",
-  "owner": "shared",
-  "project_id": "sample-project",
-  "project_name": "sample_project",
-  "relative_path": "src/main.py",
-  "logical_path": "labknowledge://shared/sample-project/src/main.py",
-  "file_name": "main.py",
-  "file_extension": ".py",
-  "chunk_index": 0
+  "text": "chunk text",
+  "metadata": {
+    "scope": "shared",
+    "owner": "shared",
+    "project_id": "examples",
+    "relative_path": "sample_project/docs/setup.md",
+    "file_name": "setup.md",
+    "chunk_index": 1
+  }
 }
 ```
 
-同名ファイルでも、`project_id + relative_path`で区別できます。
+# 5. Use the collection from Open WebUI
 
-## Collection設計
+## 5.1 Confirm embedding settings
 
-本ツールでは**1 project = 1 collection**の構成を採用します。
-
-```text
-shared_sample-project
-private_alice_floor-map
-```
-
-理由:
-
-- project単位でOpen WebUIから選択しやすい
-- 再登録時にcollection全置換できる
-- 削除済みファイルや旧chunkが残らない
-- metadata filterへ依存せず局所化しやすい
-
-project数が非常に増えた場合は、将来1 collection + payload filter方式へ移行できます。
-
-## Open WebUIとの役割分担
-
-本ツールはQdrantへの登録までを担当します。
-Open WebUI側では、外部Knowledge SourceやQdrant検索Toolを使ってcollectionを選択・検索します。OpenWebUIの標準ナレッジ機能とも共存でき、階層構造を必要としないナレッジについては、標準ナレッジ機能をつかったほうが使いやすいです。
-
-- Curated Knowledge: 本リポジトリで登録
-- Ad-hoc Knowledge: Open WebUI標準Knowledgeへ直接アップロード
-
-## 原本への到達
-
-本ツールでは原本はナレッジに登録せずチャンク化された情報のみをQdrantに登録しています。
-原本への到達性を担保するため、metadataに原本の情報を埋め込んでいます。これはAIサーバ固有の絶対パスではなく、`logical_path`を保存します。
+Open:
 
 ```text
-labknowledge://shared/sample-project/src/main.py
+Admin Panel
+→ Settings
+→ Documents
+→ Embedding
 ```
 
-これは、利用PC側で次のように対応付けます。
+Set:
 
 ```text
-Linux:   /knowledge/shared/sample-project/src/main.py
-Windows: Z:\shared\sample-project\src\main.py
+Embedding Model Engine: OpenAI
+API Base URL: http://litellm:4000/v1
+Embedding Model: lab-embedding
 ```
 
-RAGで対象ファイルを探し、より詳しい解析が必要なら、Workspace Agentなどで原本を直接参照させることを想定しています。
+The Open WebUI query embedding model must match the model used by `kb-index`.
 
+## 5.2 Add an External Knowledge Source
 
-## 登録したナレッジの使い方。
-現在、登録したナレッジをAIから使う方法は、OpenWebUIの External Knowledge Source機能を使います。OpenWebUIのチャット以外（Agentなど）から使う場合は、OpenWebUIのAPIキー経由でカスタムモデルを参照して利用します。
+Open:
 
-将来的には小さなMCPサーバーを開発し、エージェントへのナレッジの提供や、プロジェクトが増えた時の登録やプロジェクト単位のフィルタリングなどを担当する予定です。
+```text
+Admin Panel
+→ Settings
+→ Integrations
+→ External Knowledge Sources
+→ Add Knowledge Connection
+```
 
+Example:
 
+```text
+Name: Curated Knowledge
+Provider: Qdrant
+Endpoint: http://qdrant:6333
+API Key / Token: empty unless Qdrant authentication is enabled
 
-## Status
-Experimental / MIT License
+Collection: shared_examples
+Content Field: payload.text
+Vector Field: default
+Metadata Field: payload.metadata
+Document ID Field: id
+```
+
+Enter a test query such as:
+
+```text
+Which Python version is required?
+```
+
+Confirm that Open WebUI displays `Test Succeeded`, then create the connection.
+
+## 5.3 Use it in a chat
+
+Attach the created knowledge connection to a model or chat and ask questions such as:
+
+```text
+Which Python version is required?
+What does main.py do?
+```
+
+A successful setup should retrieve sources, answer from the indexed project, and display source references.
+
+# Supported file types
+
+- Markdown: `.md`, `.markdown`
+- Plain and structured text: `.txt`, `.rst`, `.yaml`, `.yml`, `.json`, `.csv`, `.toml`, `.ini`, `.cfg`, `.tex`
+- Source code: Python, JavaScript, TypeScript, Java, C/C++, C#, Go, Rust, Ruby, PHP
+- Documents: PDF, DOCX, PPTX
+
+# Design principles
+
+- Reuse existing components whenever possible.
+- Do not add a custom search server unless necessary.
+- Keep indexing separate from retrieval.
+- Preserve project structure and source metadata.
+- Prefer complete replacement over premature incremental indexing.
+- Keep the current working indexer stable before adding MCP or registration tools.
+
+# License
+
+MIT

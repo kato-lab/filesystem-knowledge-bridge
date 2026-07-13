@@ -1,0 +1,11 @@
+model_list:
+  - model_name: lab-embedding
+    litellm_params:
+      model: openai/BAAI/bge-m3
+      api_base: http://tei:80/v1
+      api_key: dummy
+      mode: embedding
+      encoding_format: float
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
