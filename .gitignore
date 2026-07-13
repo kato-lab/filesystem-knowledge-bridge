@@ -32,4 +32,6 @@ htmlcov/
 *.log
 ＃ Environment
 .env
+docker-compose.yml
+config.yml
 qdrant_storage/
