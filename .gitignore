@@ -30,7 +30,7 @@ htmlcov/
 
 # Logs
 *.log
-＃ Environment
+# Environment
 .env
 docker-compose.yml
 config.yml
