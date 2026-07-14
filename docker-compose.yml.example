@@ -143,6 +143,48 @@ services:
     restart: unless-stopped
 
 
+  # ===========================================================================
+  # filesystem-knowledge-bridge MCP server
+  #
+  # Initial version:
+  # - Searches Qdrant across shared + the requested owner's private collections
+  # - Indexes only pre-positioned personal projects
+  # - Reads original files only through a read-only mount
+  # - Does not upload, move, overwrite, or delete source files
+  # ===========================================================================
+  knowledge-bridge:
+    build: .
+    container_name: knowledge-bridge
+
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      LITELLM_API_BASE: http://litellm:4000/v1
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      KNOWLEDGE_LOGICAL_ROOT: ${KNOWLEDGE_LOGICAL_ROOT:-labknowledge://}
+      KNOWLEDGE_ROOT: /knowledge
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: ${MCP_PORT:-8000}
+      KB_SEARCH_LIMIT: ${KB_SEARCH_LIMIT:-5}
+      KB_SEARCH_MAX_LIMIT: ${KB_SEARCH_MAX_LIMIT:-10}
+      KB_SOURCE_MAX_LINES: ${KB_SOURCE_MAX_LINES:-400}
+
+    volumes:
+      - ${KNOWLEDGE_HOST_ROOT:-./knowledge}:/knowledge:ro
+
+    # Open WebUI connects through the Docker network at:
+    # http://knowledge-bridge:8000/mcp
+    expose:
+      - "8000"
+
+    depends_on:
+      - litellm
+      - qdrant
+
+    restart: unless-stopped
+
+
 # =============================================================================
 # Docker Composeのボリューム定義
 # =============================================================================
