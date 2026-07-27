@@ -431,6 +431,19 @@ main.pyは何をするプログラムですか？
 
 正常に動作していれば、登録したプロジェクトの内容に基づく回答とSource表示を確認できます。
 
+# HTTP APIからの個人Knowledge登録
+
+専用UIは提供せず、汎用のZIP登録APIを提供します。次の例は同じDockerネットワーク内のクライアントから呼ぶ場合です。
+
+```bash
+curl -X POST http://knowledge-bridge:8000/api/projects/upload \
+  -H "X-Knowledge-Owner: alice" \
+  -F "project=project-a" \
+  -F "file=@project-a.zip"
+```
+
+同名の原本が存在する場合は上書きせず、HTTP 409を返します。登録処理は原本を自動削除しません。
+
 # 対応ファイル形式
 
 - Markdown：`.md`、`.markdown`

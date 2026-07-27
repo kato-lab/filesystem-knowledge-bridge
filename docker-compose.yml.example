@@ -148,9 +148,9 @@ services:
   #
   # Initial version:
   # - Searches Qdrant across shared + the requested owner's private collections
-  # - Indexes only pre-positioned personal projects
-  # - Reads original files only through a read-only mount
-  # - Does not upload, move, overwrite, or delete source files
+  # - Accepts ZIP uploads through a generic HTTP API
+  # - Preserves uploaded ZIP files and installed source projects
+  # - Never overwrites or deletes an existing source project
   # ===========================================================================
   knowledge-bridge:
     build: .
@@ -169,14 +169,21 @@ services:
       KB_SEARCH_LIMIT: ${KB_SEARCH_LIMIT:-5}
       KB_SEARCH_MAX_LIMIT: ${KB_SEARCH_MAX_LIMIT:-10}
       KB_SOURCE_MAX_LINES: ${KB_SOURCE_MAX_LINES:-400}
+      KB_MAX_UPLOAD_BYTES: ${KB_MAX_UPLOAD_BYTES:-2147483648}
+      KB_MAX_EXTRACTED_BYTES: ${KB_MAX_EXTRACTED_BYTES:-5368709120}
+      KB_MAX_ARCHIVE_FILES: ${KB_MAX_ARCHIVE_FILES:-100000}
 
     volumes:
-      - ${KNOWLEDGE_HOST_ROOT:-./knowledge}:/knowledge:ro
+      - ${KNOWLEDGE_HOST_ROOT:-./knowledge}:/knowledge:rw
 
     # Open WebUI connects through the Docker network at:
     # http://knowledge-bridge:8000/mcp
     expose:
       - "8000"
+
+    # ホストからAPIを直接試験するときだけ一時的に有効化する。
+    # ports:
+    #   - "127.0.0.1:8000:8000"
 
     depends_on:
       - litellm
