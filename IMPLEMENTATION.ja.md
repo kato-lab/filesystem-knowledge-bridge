@@ -1,41 +1,22 @@
 # v0.2.0 実装方針
 
-v0.1.0の `kb_index.py` を登録処理の本体として維持し、二つのMCPサービスを追加した最小構成です。
+v0.1.0のIndexerを起点に、同じPythonパッケージとDockerイメージから二つのMCPサービスを起動します。
 
-## サービス
+- `knowledge-read-mcp`: 検索・一覧・慎重な原本参照。原本領域は読み取り専用。
+- `knowledge-register-mcp`: incomingに事前配置された個人projectの登録・再登録。
 
-### knowledge-read-mcp（8000）
+登録MCPはファイルアップロードを受け付けません。原本はSMBなどで`incoming/users/<owner>/<project>/`へ配置します。登録時はincomingをコピーし、incoming原本を削除・移動しません。保存済み同名原本がある場合も自動上書きせずエラーにします。
 
-原本領域を読み取り専用でマウントします。
+認証・ownerの本人確認は初期版では実装していません。MCPポートはlocalhostまたは信頼できる内部ネットワークだけに公開してください。
 
-- `search_knowledge`
-- `list_knowledge_projects`
-- `read_knowledge_source`
 
-### knowledge-register-mcp（8001）
+## uvによる依存管理
 
-incomingを読み取り専用、保護された原本領域を読み書き可能でマウントします。
+依存管理は`uv`のプロジェクト管理機能へ統一します。
 
-- `list_incoming`
-- `register_incoming_project`
-- `reindex_stored_project`
+- 開発環境の構築: `uv sync`
+- 依存の追加: `uv add <package-name>`
+- CLIの実行: `uv run <command>`
+- Dockerイメージ内の環境構築: `uv sync --no-dev`
 
-`register_incoming_project` は `/incoming/users/<owner>/<project>/` を
-`/knowledge/users/<owner>/<project>/` へコピーし、その後 `kb_index.index_directory()` を呼びます。
-
-## 原本保全
-
-- incomingを削除・移動しません。
-- 保存済み原本を上書き・削除しません。
-- 同名原本がある場合は登録を拒否します。
-- QdrantのCollectionは従来どおり削除・再構築します。
-- Qdrant登録失敗後は `reindex_stored_project` で再実行できます。
-
-## 同時登録
-
-登録は1プロセスにつき同時1件です。競合時は待機せずエラーを返します。
-
-## 認証について
-
-初期版は `X-Knowledge-Owner` または `X-OpenWebUI-User-Name` をowner識別に使います。
-これは完全な認証ではありません。信頼できる内部ネットワークでのみ利用してください。
+`uv pip`や`pip install`は使用しません。`uv.lock`を生成・更新できる環境では、Dockerfileの同期コマンドを`uv sync --frozen --no-dev`へ変更できます。

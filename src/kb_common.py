@@ -9,10 +9,9 @@ QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY") or None
 LITELLM_API_BASE = os.environ.get("LITELLM_API_BASE", "http://localhost:4000/v1").rstrip("/")
 LITELLM_API_KEY = os.environ.get("LITELLM_API_KEY", "")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "lab-embedding")
-_logical_root = os.environ.get("KNOWLEDGE_LOGICAL_ROOT", "labknowledge://")
-KNOWLEDGE_LOGICAL_ROOT = _logical_root if _logical_root.endswith("://") else _logical_root.rstrip("/") + "/"
-KNOWLEDGE_ROOT = Path(os.environ.get("KNOWLEDGE_ROOT", "/knowledge")).expanduser()
-INCOMING_ROOT = Path(os.environ.get("INCOMING_ROOT", "/incoming")).expanduser()
+KNOWLEDGE_ROOT = Path(os.environ.get("KNOWLEDGE_ROOT", "/knowledge"))
+INCOMING_ROOT = Path(os.environ.get("INCOMING_ROOT", "/incoming"))
+KNOWLEDGE_LOGICAL_ROOT = os.environ.get("KNOWLEDGE_LOGICAL_ROOT", "labknowledge://").rstrip("/") + "/"
 
 
 def sanitize_identifier(value: str, max_length: int = 120) -> str:
@@ -30,3 +29,11 @@ def collection_name_for(project_id: str, shared: bool, owner: str) -> str:
 def logical_path_for(relative_path: str, project_id: str, shared: bool, owner: str) -> str:
     prefix = f"shared/{project_id}" if shared else f"users/{owner}/{project_id}"
     return f"{KNOWLEDGE_LOGICAL_ROOT}{prefix}/{relative_path}"
+
+
+def resolve_under(root: Path, *parts: str) -> Path:
+    root = root.resolve()
+    target = root.joinpath(*parts).resolve()
+    if not target.is_relative_to(root):
+        raise ValueError("許可されたディレクトリの外は参照できません")
+    return target

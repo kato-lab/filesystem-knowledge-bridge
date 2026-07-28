@@ -1,7 +1,14 @@
-FROM python:3.12-slim
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
-COPY . /app
-RUN pip install --no-cache-dir .
 
-CMD ["kb-read-mcp"]
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/app/.venv/bin:${PATH}"
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+
+RUN uv sync --no-dev
+
+ENTRYPOINT []

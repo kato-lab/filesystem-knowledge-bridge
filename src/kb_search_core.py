@@ -1,58 +1,28 @@
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable
-from urllib.parse import unquote, urlparse
+from typing import Any
 
 import httpx
 from qdrant_client import QdrantClient
 
 from kb_common import (
     EMBEDDING_MODEL,
-    KNOWLEDGE_LOGICAL_ROOT,
     KNOWLEDGE_ROOT,
     LITELLM_API_BASE,
     LITELLM_API_KEY,
     QDRANT_API_KEY,
     QDRANT_URL,
+    resolve_under,
     sanitize_identifier,
 )
 
-DEFAULT_SEARCH_LIMIT = int(os.environ.get("KB_SEARCH_LIMIT", "5"))
-MAX_SEARCH_LIMIT = int(os.environ.get("KB_SEARCH_MAX_LIMIT", "10"))
-MAX_SOURCE_LINES = int(os.environ.get("KB_SOURCE_MAX_LINES", "400"))
-
-READABLE_EXTENSIONS = {
-    ".md", ".markdown", ".txt", ".rst", ".yaml", ".yml", ".json", ".csv",
-    ".toml", ".ini", ".cfg", ".tex", ".py", ".js", ".jsx", ".ts", ".tsx",
-    ".java", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".cs", ".go",
-    ".rs", ".rb", ".php",
+TEXT_SOURCE_EXTENSIONS = {
+    ".txt", ".rst", ".yaml", ".yml", ".json", ".csv", ".toml", ".ini", ".cfg", ".tex",
+    ".md", ".markdown", ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".c", ".h",
+    ".cpp", ".cc", ".cxx", ".hpp", ".cs", ".go", ".rs", ".rb", ".php",
 }
-
-
-@dataclass(slots=True)
-class SearchResult:
-    score: float
-    collection: str
-    project_id: str
-    project_name: str
-    scope: str
-    owner: str
-    relative_path: str
-    logical_path: str
-    source_ref: str
-    chunk_index: int
-    text: str
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-def make_qdrant_client() -> QdrantClient:
-    return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
 
 def embed_query(query: str) -> list[float]:
@@ -62,184 +32,173 @@ def embed_query(query: str) -> list[float]:
         f"{LITELLM_API_BASE}/embeddings",
         headers={"Authorization": f"Bearer {LITELLM_API_KEY}"},
         json={"model": EMBEDDING_MODEL, "input": query, "encoding_format": "float"},
-        timeout=120,
+        timeout=60,
     )
     response.raise_for_status()
     return response.json()["data"][0]["embedding"]
 
 
-def _collection_names(client: QdrantClient) -> list[str]:
-    return sorted(item.name for item in client.get_collections().collections)
+def list_allowed_collections(client: QdrantClient, owner: str | None) -> list[str]:
+    names = [item.name for item in client.get_collections().collections]
+    allowed = [name for name in names if name.startswith("shared_")]
+    if owner:
+        prefix = f"private_{sanitize_identifier(owner)}_"
+        allowed.extend(name for name in names if name.startswith(prefix))
+    return sorted(set(allowed))
 
 
-def accessible_collections(client: QdrantClient, owner: str) -> list[str]:
-    owner_id = sanitize_identifier(owner)
-    personal_prefix = f"private_{owner_id}_"
-    return [
-        name for name in _collection_names(client)
-        if name.startswith("shared_") or name.startswith(personal_prefix)
-    ]
+def filter_projects(collections: list[str], projects: list[str] | None, owner: str | None) -> list[str]:
+    if not projects:
+        return collections
+    project_ids = {sanitize_identifier(project) for project in projects}
+    owner_prefix = f"private_{sanitize_identifier(owner)}_" if owner else ""
+    selected = []
+    for collection in collections:
+        if collection.startswith("shared_"):
+            project_id = collection.removeprefix("shared_")
+        elif owner_prefix and collection.startswith(owner_prefix):
+            project_id = collection.removeprefix(owner_prefix)
+        else:
+            continue
+        if project_id in project_ids:
+            selected.append(collection)
+    return selected
 
 
-def resolve_collections(client: QdrantClient, owner: str, projects: Iterable[str] | None = None) -> list[str]:
-    allowed = accessible_collections(client, owner)
-    requested = [sanitize_identifier(p) for p in (projects or []) if p and p.strip()]
-    if not requested:
-        return allowed
-
-    selected = [
-        name for name in allowed
-        if any(name in {f"shared_{project}", f"private_{sanitize_identifier(owner)}_{project}"} for project in requested)
-    ]
-    missing = [
-        project for project in requested
-        if not any(name in {f"shared_{project}", f"private_{sanitize_identifier(owner)}_{project}"} for name in allowed)
-    ]
-    if missing:
-        raise ValueError(f"参照可能なプロジェクトが見つかりません: {', '.join(missing)}")
-    return sorted(set(selected))
-
-
-def _payload_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+def _metadata_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     metadata = payload.get("metadata")
-    if not isinstance(metadata, dict):
-        return {}
-    nested = metadata.get("metadata")
-    return {**metadata, **nested} if isinstance(nested, dict) else metadata
+    if isinstance(metadata, dict):
+        return metadata
+    node_content = payload.get("_node_content")
+    if isinstance(node_content, str):
+        try:
+            parsed = json.loads(node_content)
+            value = parsed.get("metadata")
+            if isinstance(value, dict):
+                return value
+        except json.JSONDecodeError:
+            pass
+    return payload
 
 
-def _payload_text(payload: dict[str, Any]) -> str:
-    if isinstance(payload.get("text"), str):
-        return payload["text"]
+def _text_from_payload(payload: dict[str, Any]) -> str:
+    value = payload.get("text")
+    if isinstance(value, str):
+        return value
     metadata = payload.get("metadata")
     if isinstance(metadata, dict) and isinstance(metadata.get("text"), str):
         return metadata["text"]
-    raw_node = payload.get("_node_content")
-    if isinstance(raw_node, str):
+    node_content = payload.get("_node_content")
+    if isinstance(node_content, str):
         try:
-            node = json.loads(raw_node)
-            text = node.get("text") or node.get("text_resource", {}).get("text")
-            return text if isinstance(text, str) else ""
+            parsed = json.loads(node_content)
+            for key in ("text", "text_resource"):
+                candidate = parsed.get(key)
+                if isinstance(candidate, str):
+                    return candidate
+                if isinstance(candidate, dict) and isinstance(candidate.get("text"), str):
+                    return candidate["text"]
         except json.JSONDecodeError:
-            return ""
+            pass
     return ""
 
 
 def search_knowledge(
     query: str,
-    owner: str,
-    projects: Iterable[str] | None = None,
-    limit: int = DEFAULT_SEARCH_LIMIT,
     *,
-    client: QdrantClient | None = None,
-) -> list[SearchResult]:
-    query = query.strip()
-    if not query:
-        raise ValueError("検索文が空です")
-
-    limit = max(1, min(int(limit), MAX_SEARCH_LIMIT))
-    qdrant = client or make_qdrant_client()
-    collections = resolve_collections(qdrant, owner, projects)
+    owner: str | None = None,
+    projects: list[str] | None = None,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    if not query.strip():
+        raise ValueError("queryが空です")
+    limit = max(1, min(limit, 10))
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    collections = filter_projects(list_allowed_collections(client, owner), projects, owner)
     if not collections:
         return []
 
     vector = embed_query(query)
-    results: list[SearchResult] = []
+    candidates: list[dict[str, Any]] = []
+    per_collection = min(max(limit, 3), 10)
     for collection in collections:
-        response = qdrant.query_points(
+        result = client.query_points(
             collection_name=collection,
             query=vector,
-            limit=limit,
+            limit=per_collection,
             with_payload=True,
             with_vectors=False,
         )
-        for point in response.points:
+        for point in result.points:
             payload = point.payload or {}
-            metadata = _payload_metadata(payload)
-            results.append(SearchResult(
-                score=float(point.score),
-                collection=collection,
-                project_id=str(metadata.get("project_id", "")),
-                project_name=str(metadata.get("project_name", metadata.get("project_id", ""))),
-                scope=str(metadata.get("scope", "")),
-                owner=str(metadata.get("owner", "")),
-                relative_path=str(metadata.get("relative_path", "")),
-                logical_path=str(metadata.get("logical_path", "")),
-                source_ref=str(metadata.get("source_ref", metadata.get("logical_path", ""))),
-                chunk_index=int(metadata.get("chunk_index", 0) or 0),
-                text=_payload_text(payload),
-            ))
+            metadata = _metadata_from_payload(payload)
+            candidates.append({
+                "score": float(point.score),
+                "collection": collection,
+                "text": _text_from_payload(payload),
+                "scope": metadata.get("scope"),
+                "owner": metadata.get("owner"),
+                "project_id": metadata.get("project_id"),
+                "project_name": metadata.get("project_name"),
+                "relative_path": metadata.get("relative_path"),
+                "logical_path": metadata.get("logical_path"),
+                "chunk_index": metadata.get("chunk_index"),
+                "logical_id": metadata.get("logical_id"),
+            })
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    return candidates[:limit]
 
-    results.sort(key=lambda item: item.score, reverse=True)
-    return results[:limit]
 
-
-def list_knowledge_projects(owner: str, *, client: QdrantClient | None = None) -> list[dict[str, Any]]:
-    qdrant = client or make_qdrant_client()
-    projects = []
-    for collection in accessible_collections(qdrant, owner):
-        points, _ = qdrant.scroll(collection_name=collection, limit=1, with_payload=True, with_vectors=False)
-        metadata = _payload_metadata(points[0].payload or {}) if points else {}
-        projects.append({
-            "collection": collection,
-            "project_id": str(metadata.get("project_id", "")),
-            "project_name": str(metadata.get("project_name", metadata.get("project_id", ""))),
-            "scope": str(metadata.get("scope", "shared" if collection.startswith("shared_") else "personal")),
-            "owner": str(metadata.get("owner", "shared")),
-        })
+def list_knowledge_projects(owner: str | None = None) -> list[dict[str, str]]:
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    projects: list[dict[str, str]] = []
+    owner_id = sanitize_identifier(owner) if owner else None
+    for collection in list_allowed_collections(client, owner):
+        if collection.startswith("shared_"):
+            projects.append({"scope": "shared", "owner": "shared", "project_id": collection.removeprefix("shared_"), "collection": collection})
+        elif owner_id and collection.startswith(f"private_{owner_id}_"):
+            projects.append({"scope": "personal", "owner": owner_id, "project_id": collection.removeprefix(f"private_{owner_id}_"), "collection": collection})
     return projects
 
 
-def _resolve_source_path(source_ref: str, owner: str) -> Path:
-    parsed = urlparse(source_ref)
-    expected_scheme = urlparse(KNOWLEDGE_LOGICAL_ROOT).scheme or "labknowledge"
-    if parsed.scheme not in {expected_scheme, "kbsource"}:
-        raise ValueError("このシステムが発行したsource_refではありません")
-
-    parts = [unquote(parsed.netloc), *[unquote(p) for p in parsed.path.split("/") if p]] if parsed.netloc else [
-        unquote(p) for p in parsed.path.split("/") if p
-    ]
-    if len(parts) < 3:
-        raise ValueError("logical_pathの形式が不正です")
-
-    if parts[0] == "shared":
-        base = KNOWLEDGE_ROOT / "shared" / parts[1]
-        relative_parts = parts[2:]
-    elif parts[0] == "users":
-        if len(parts) < 4:
-            raise ValueError("個人logical_pathの形式が不正です")
-        ref_owner = sanitize_identifier(parts[1])
-        if ref_owner != sanitize_identifier(owner):
-            raise PermissionError("他ユーザーの個人ナレッジは参照できません")
-        base = KNOWLEDGE_ROOT / "users" / ref_owner / parts[2]
-        relative_parts = parts[3:]
+def read_knowledge_source(
+    *,
+    scope: str,
+    project: str,
+    relative_path: str,
+    owner: str | None = None,
+    start_line: int = 1,
+    max_lines: int = 200,
+) -> dict[str, Any]:
+    project_name = Path(project).name
+    if project_name != project or project in {"", ".", ".."}:
+        raise ValueError("不正なproject名です")
+    if scope == "shared":
+        root = resolve_under(KNOWLEDGE_ROOT, "shared", project_name)
+    elif scope == "personal":
+        if not owner:
+            raise ValueError("個人ナレッジの参照にはownerが必要です")
+        root = resolve_under(KNOWLEDGE_ROOT, "users", sanitize_identifier(owner), project_name)
     else:
-        raise ValueError("未知のKnowledge scopeです")
+        raise ValueError("scopeはsharedまたはpersonalです")
 
-    base = base.resolve()
-    target = base.joinpath(*relative_parts).resolve()
-    if not target.is_relative_to(base):
-        raise PermissionError("Knowledgeルート外のパスは参照できません")
-    return target
-
-
-def read_knowledge_source(source_ref: str, owner: str, start_line: int = 1, max_lines: int = 200) -> dict[str, Any]:
-    target = _resolve_source_path(source_ref, owner)
+    target = resolve_under(root, relative_path)
     if not target.is_file():
-        raise FileNotFoundError(f"原本が見つかりません: {source_ref}")
-    if target.suffix.lower() not in READABLE_EXTENSIONS:
-        raise ValueError(f"原本参照に対応していない形式です: {target.suffix.lower()}")
+        raise FileNotFoundError(f"原本が見つかりません: {relative_path}")
+    if target.suffix.lower() not in TEXT_SOURCE_EXTENSIONS:
+        raise ValueError("この形式は原本テキスト参照の対象外です")
 
-    start_line = max(1, int(start_line))
-    max_lines = max(1, min(int(max_lines), MAX_SOURCE_LINES))
     lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
-    selected = lines[start_line - 1:start_line - 1 + max_lines]
-    end_line = start_line + len(selected) - 1
+    start = max(1, start_line)
+    count = max(1, min(max_lines, 400))
+    selected = lines[start - 1:start - 1 + count]
     return {
-        "source_ref": source_ref,
-        "start_line": start_line,
-        "end_line": end_line,
+        "scope": scope,
+        "owner": "shared" if scope == "shared" else sanitize_identifier(owner or ""),
+        "project": project_name,
+        "relative_path": relative_path,
+        "start_line": start,
+        "end_line": start + len(selected) - 1,
         "total_lines": len(lines),
-        "truncated": end_line < len(lines),
-        "text": "\n".join(f"{number:>6}: {line}" for number, line in enumerate(selected, start=start_line)),
+        "content": "\n".join(f"{number}: {line}" for number, line in enumerate(selected, start=start)),
     }

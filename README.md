@@ -1,450 +1,179 @@
 # filesystem-knowledge-bridge
 
-A lightweight indexing tool for registering frozen project folders as Qdrant collections and using them from Open WebUI through External Knowledge Sources.
+**filesystem-knowledge-bridge** is a lightweight knowledge indexing and retrieval tool that registers frozen project folders as **Qdrant Collections** and makes them searchable and readable through CLI and MCP.
 
-> Keep the architecture simple: reuse existing RAG components and customize only the indexing step.
+> A **frozen project** is a project whose development or editing has reached a stable point and whose contents have been fixed as a specific version. This tool is designed to register and manage such projects as searchable knowledge.
 
-Japanese documentation: [README.ja.md](README.ja.md)
+It indexes source code, Markdown, PDF, and Office documents on a per-project basis. Search results can optionally lead to the original source files, making the tool suitable as a knowledge backend for AI agents and chat systems.
 
-## Overview
-
-```text
-Frozen project folder
-        │
-        ▼
-     kb-index
-        │
-        ├── LiteLLM ── TEI / BGE-M3
-        │
-        ▼
-      Qdrant
-        │
-        ▼
-Open WebUI External Knowledge Sources
-```
-
-The project does not provide a custom search server. Open WebUI searches the Qdrant collection directly.
+The project focuses on knowledge registration, search, and source access, and does not depend on a particular UI such as Open WebUI.
 
 ## Features
 
-- Preserves project and relative path metadata
-- Creates one Qdrant collection per project by default
-- Supports shared and personal knowledge
-- Supports Markdown, source code, plain text, PDF, DOCX, and PPTX
-- Uses file-type-specific chunking
-- Generates embeddings through an OpenAI-compatible LiteLLM endpoint
-- Stores Open WebUI-compatible `text` and `metadata` payload fields
-- Replaces an existing collection when re-indexing
-- Provides a host-side CLI and an optional containerized execution path
+- One Qdrant Collection per project
+- Shared and personal knowledge scopes
+- Administrator indexing with `kb-index`
+- CLI search with `kb-search`
+- Read MCP for search, project listing, and source access
+- Register MCP for importing pre-staged projects and rebuilding indexes
+- Original files remain on the filesystem rather than being stored in Qdrant
 
-## Requirements
+## Architecture
 
-- Linux or macOS
-- Python 3.11 or later
-- [uv](https://docs.astral.sh/uv/)
-- Docker and Docker Compose
-- Open WebUI 0.10.2 or later
-- LiteLLM Proxy
-- Qdrant
-- An embedding backend such as TEI with `BAAI/bge-m3`
+The same Python package and Docker image are used to run two separate MCP services:
 
-# 1. Install `kb-index`
+- **Read MCP**: search, listing, and cautious source access
+- **Register MCP**: import from an incoming directory and rebuild indexes
 
-## 1.1 Local user installation
-
-```bash
-uv tool install .
-```
-
-The executable is normally placed under:
+## Collection names
 
 ```text
-~/.local/bin/kb-index
+Shared:   shared_<project-id>
+Personal: private_<owner>_<project-id>
 ```
 
-Ensure that `~/.local/bin` is in `PATH`, then check:
+The initial version does not implement authentication or verify that an owner value belongs to the caller. Expose MCP endpoints only on localhost or a trusted internal network.
+
+## Installation
+
+After cloning the repository, synchronize the project environment:
 
 ```bash
-kb-index --help
+uv sync
 ```
 
-To reinstall after changing the source:
+Run the CLI commands through `uv run`:
 
 ```bash
-uv tool install --force .
+uv run kb-index --help
+uv run kb-search --help
 ```
 
-During development, you can also run it without installing:
+Use `uv add` when adding dependencies instead of editing `pyproject.toml` manually:
 
 ```bash
-uv run src/kb_index.py --shared examples
+uv add <package-name>
 ```
 
-or, when the project script entry is configured:
-
-```bash
-uv run kb-index --shared examples
-```
-
-## 1.2 System-wide installation
-
-Build the wheel as a normal user first:
-
-```bash
-rm -rf build dist src/*.egg-info
-uv build
-```
-
-Install the wheel for all users:
-
-```bash
-sudo mkdir -p /opt/uv-tools /usr/local/bin
-
-sudo env \
-  UV_TOOL_DIR=/opt/uv-tools \
-  UV_TOOL_BIN_DIR=/usr/local/bin \
-  uv tool install --force dist/*.whl
-```
-
-Check the installation:
-
-```bash
-which kb-index
-kb-index --help
-```
-
-Expected executable path:
-
-```text
-/usr/local/bin/kb-index
-```
-
-To uninstall:
-
-```bash
-sudo env \
-  UV_TOOL_DIR=/opt/uv-tools \
-  UV_TOOL_BIN_DIR=/usr/local/bin \
-  uv tool uninstall filesystem-knowledge-bridge
-```
-
-The uninstall name is the package name from `pyproject.toml`, not necessarily the executable name.
-
-# 2. Configure the CLI
-
-`kb-index` reads the following environment variables:
+## Environment
 
 ```dotenv
 QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=
-
 LITELLM_API_BASE=http://localhost:4000/v1
-LITELLM_API_KEY=your-litellm-key
+LITELLM_API_KEY=
 EMBEDDING_MODEL=lab-embedding
-
 KNOWLEDGE_LOGICAL_ROOT=labknowledge://
 ```
 
-When LiteLLM authentication uses one master key, set:
+Use the same embedding model for indexing and search.
 
-```bash
-export LITELLM_API_KEY="$LITELLM_MASTER_KEY"
-```
+## Indexing with CLI
 
-The host-side CLI must be able to reach both LiteLLM and Qdrant.
-
-## Basic usage
+Shared knowledge:
 
 ```bash
 kb-index --shared /path/to/project
-kb-index /path/to/project
+```
+
+Personal knowledge:
+
+```bash
 kb-index --owner alice /path/to/project
-kb-index --project-id stable-project-id /path/to/project
-kb-index --collection curated_project /path/to/project
-kb-index --shared --dry-run /path/to/project
 ```
 
-Default collection names:
+Re-indexing deletes and rebuilds the Qdrant Collection. It does not modify or delete the source files.
 
-```text
-shared_<project-id>
-private_<owner>_<project-id>
+## Searching with CLI
+
+```bash
+kb-search --owner alice "MCP server design"
 ```
 
-# 3. Build the complete system
+Limit search to a project:
 
-The minimal runtime system consists of Open WebUI, LiteLLM, Qdrant, and TEI with BGE-M3. The indexer itself does not need to run continuously.
+```bash
+kb-search --owner alice \
+  --project filesystem-knowledge-bridge \
+  "registration"
+```
 
-## 3.1 `.env`
+## Docker Compose
+
+Configure the host directories in `.env`:
 
 ```dotenv
-COMPOSE_PROJECT_NAME=lab-ai
-
-OPENWEBUI_PORT=3000
-WEBUI_SECRET_KEY=replace-with-a-long-random-secret
-ENABLE_SIGNUP=true
-RAG_TOP_K=5
-
-LITELLM_PORT=4000
-LITELLM_MASTER_KEY=replace-with-a-strong-key
-
-OPENAI_API_KEY=
-GEMINI_API_KEY=
-ANTHROPIC_API_KEY=
-
-EMBEDDING_MODEL=lab-embedding
-
-QDRANT_HTTP_PORT=6333
-QDRANT_API_KEY=
-
-KNOWLEDGE_LOGICAL_ROOT=labknowledge://
+KNOWLEDGE_HOST_ROOT=/mnt/knowledge
+KNOWLEDGE_INCOMING_HOST_ROOT=/mnt/knowledge-incoming
 ```
 
-Do not commit `.env`.
-
-```gitignore
-.env
-open-webui/
-```
-
-## 3.2 `docker-compose.yml`
-
-```yaml
-services:
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.10.2
-    container_name: open-webui
-    ports:
-      - "${OPENWEBUI_PORT:-3000}:8080"
-    volumes:
-      - ./open-webui:/app/backend/data
-    environment:
-      OPENAI_API_BASE_URL: http://litellm:4000/v1
-      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
-
-      RAG_EMBEDDING_ENGINE: openai
-      RAG_OPENAI_API_BASE_URL: http://litellm:4000/v1
-      RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
-      RAG_EMBEDDING_MODEL: ${EMBEDDING_MODEL}
-      RAG_TOP_K: ${RAG_TOP_K:-5}
-
-      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
-      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
-    depends_on:
-      - litellm
-      - qdrant
-    restart: unless-stopped
-
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: litellm
-    env_file:
-      - .env
-    volumes:
-      - ./litellm/config.yaml:/app/config.yaml:ro
-    command:
-      - "--config=/app/config.yaml"
-    ports:
-      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
-    restart: unless-stopped
-
-  tei:
-    image: ghcr.io/huggingface/text-embeddings-inference:latest
-    container_name: tei
-    command:
-      - --model-id
-      - BAAI/bge-m3
-    volumes:
-      - hf_cache:/data
-    restart: unless-stopped
-
-  qdrant:
-    image: qdrant/qdrant:v1.17.0
-    container_name: qdrant
-    ports:
-      - "127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    restart: unless-stopped
-
-volumes:
-  qdrant_data:
-  hf_cache:
-```
-
-Only Open WebUI needs to be exposed to users. LiteLLM and Qdrant are bound to localhost above only so that the host-side `kb-index` command can reach them. TEI is not exposed.
-
-## 3.3 LiteLLM `config.yaml`
-
-```yaml
-model_list:
-  - model_name: lab-embedding
-    litellm_params:
-      model: openai/BAAI/bge-m3
-      api_base: http://tei:80/v1
-      api_key: dummy
-      mode: embedding
-      encoding_format: float
-
-general_settings:
-  master_key: os.environ/LITELLM_MASTER_KEY
-```
-
-Add chat models to the same `model_list` as needed.
-
-## 3.4 Start and verify
+Build and start only the MCP services:
 
 ```bash
-docker compose up -d
-docker compose ps
+docker compose -f docker-compose.yml.example up -d --build \
+  knowledge-read-mcp knowledge-register-mcp
 ```
 
-```bash
-curl http://localhost:4000/v1/models \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
-```
-
-```bash
-curl http://localhost:4000/v1/embeddings \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "lab-embedding",
-    "input": "test embedding",
-    "encoding_format": "float"
-  }'
-```
-
-```bash
-curl http://localhost:6333/collections
-```
-
-# 4. Register a project
-
-```bash
-export QDRANT_URL=http://localhost:6333
-export LITELLM_API_BASE=http://localhost:4000/v1
-export LITELLM_API_KEY="$LITELLM_MASTER_KEY"
-export EMBEDDING_MODEL=lab-embedding
-
-kb-index --shared examples
-```
-
-The command scans supported files, chunks them, generates embeddings through LiteLLM, recreates the target collection, and stores Open WebUI-compatible payload fields.
-
-Inspect one point:
-
-```bash
-curl http://localhost:6333/collections/shared_examples/points/scroll \
-  -H "Content-Type: application/json" \
-  -d '{
-    "limit": 1,
-    "with_payload": true,
-    "with_vector": false
-  }'
-```
-
-Expected fields:
-
-```json
-{
-  "text": "chunk text",
-  "metadata": {
-    "scope": "shared",
-    "owner": "shared",
-    "project_id": "examples",
-    "relative_path": "sample_project/docs/setup.md",
-    "file_name": "setup.md",
-    "chunk_index": 1
-  }
-}
-```
-
-# 5. Use the collection from Open WebUI
-
-## 5.1 Confirm embedding settings
-
-Open:
+Endpoints:
 
 ```text
-Admin Panel
-→ Settings
-→ Documents
-→ Embedding
+Read MCP:     http://localhost:8000/mcp
+Register MCP: http://localhost:8001/mcp
 ```
 
-Set:
+## Read MCP tools
+
+- `search_knowledge`
+- `list_knowledge_projects`
+- `read_knowledge_source`
+
+The search tool searches shared Collections and, when an owner is supplied, that owner's personal Collections. When projects are omitted, results are merged across the allowed Collections and only the overall top results are returned.
+
+Source access is a separate, explicit operation. Search does not automatically return entire source files.
+
+## Register MCP tools
+
+- `list_incoming`
+- `register_incoming_project`
+- `reindex_stored_project`
+
+Place projects in:
 
 ```text
-Embedding Model Engine: OpenAI
-API Base URL: http://litellm:4000/v1
-Embedding Model: lab-embedding
+/incoming/users/<owner>/<project>/
 ```
 
-The Open WebUI query embedding model must match the model used by `kb-index`.
-
-## 5.2 Add an External Knowledge Source
-
-Open:
+Registration copies a project to:
 
 ```text
-Admin Panel
-→ Settings
-→ Integrations
-→ External Knowledge Sources
-→ Add Knowledge Connection
+/knowledge/users/<owner>/<project>/
 ```
 
-Example:
+The register service follows these rules:
+
+- It never deletes or moves the incoming source
+- It never overwrites an existing stored source automatically
+- It returns an error when the destination already exists
+- Only one registration runs at a time
+- Stored source files remain after an indexing failure
+
+## Source directories
 
 ```text
-Name: Curated Knowledge
-Provider: Qdrant
-Endpoint: http://qdrant:6333
-API Key / Token: empty unless Qdrant authentication is enabled
+/knowledge/
+├── shared/<project>/
+└── users/<owner>/<project>/
 
-Collection: shared_examples
-Content Field: payload.text
-Vector Field: default
-Metadata Field: payload.metadata
-Document ID Field: id
+/incoming/
+└── users/<owner>/<project>/
 ```
 
-Enter a test query such as:
+The Read MCP mounts `/knowledge` read-only. The Register MCP has write access to `/knowledge` and read-only access to `/incoming`.
 
-```text
-Which Python version is required?
-```
+## Testing
 
-Confirm that Open WebUI displays `Test Succeeded`, then create the connection.
+See [MCP_TEST.ja.md](MCP_TEST.ja.md).
 
-## 5.3 Use it in a chat
+## License
 
-Attach the created knowledge connection to a model or chat and ask questions such as:
-
-```text
-Which Python version is required?
-What does main.py do?
-```
-
-A successful setup should retrieve sources, answer from the indexed project, and display source references.
-
-# Supported file types
-
-- Markdown: `.md`, `.markdown`
-- Plain and structured text: `.txt`, `.rst`, `.yaml`, `.yml`, `.json`, `.csv`, `.toml`, `.ini`, `.cfg`, `.tex`
-- Source code: Python, JavaScript, TypeScript, Java, C/C++, C#, Go, Rust, Ruby, PHP
-- Documents: PDF, DOCX, PPTX
-
-# Design principles
-
-- Reuse existing components whenever possible.
-- Do not add a custom search server unless necessary.
-- Keep indexing separate from retrieval.
-- Preserve project structure and source metadata.
-- Prefer complete replacement over premature incremental indexing.
-- Keep the current working indexer stable before adding MCP or registration tools.
-
-# License
-
-MIT
+MIT License

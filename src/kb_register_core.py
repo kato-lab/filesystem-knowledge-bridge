@@ -5,82 +5,60 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from kb_common import INCOMING_ROOT, KNOWLEDGE_ROOT, sanitize_identifier
-from kb_index import index_directory
+from kb_common import INCOMING_ROOT, KNOWLEDGE_ROOT, resolve_under, sanitize_identifier
 
 _REGISTER_LOCK = threading.Lock()
 
 
-def list_incoming_projects(owner: str) -> list[str]:
+def _project_name(value: str) -> str:
+    name = Path(value).name
+    if name != value or value in {"", ".", ".."}:
+        raise ValueError("不正なproject名です")
+    return name
+
+
+def list_incoming(owner: str) -> list[str]:
     owner_id = sanitize_identifier(owner)
-    root = (INCOMING_ROOT / "users" / owner_id).resolve()
+    root = resolve_under(INCOMING_ROOT, "users", owner_id)
     if not root.is_dir():
         return []
     return sorted(path.name for path in root.iterdir() if path.is_dir() and not path.name.startswith("."))
 
 
-def import_incoming_project(owner: str, project: str, project_id: str | None = None) -> dict[str, Any]:
-    """Copy an incoming directory to the protected source store and index it.
-
-    Incoming and existing source directories are never deleted or overwritten.
-    A failed index can be retried with index_stored_project().
-    """
+def register_incoming_project(owner: str, project: str, project_id: str | None = None) -> dict[str, Any]:
     owner_id = sanitize_identifier(owner)
-    project_dir = project.strip()
-    if not project_dir or Path(project_dir).name != project_dir:
-        raise ValueError("projectにはincoming直下のフォルダ名を指定してください")
-
-    incoming_root = (INCOMING_ROOT / "users" / owner_id).resolve()
-    source = (incoming_root / project_dir).resolve()
-    if not source.is_relative_to(incoming_root) or not source.is_dir():
-        raise FileNotFoundError(f"incomingプロジェクトが見つかりません: {source}")
-
-    knowledge_root = (KNOWLEDGE_ROOT / "users" / owner_id).resolve()
-    destination = (knowledge_root / project_dir).resolve()
-    if not destination.is_relative_to(knowledge_root):
-        raise PermissionError("個人Knowledge領域外へ配置できません")
-
+    project_name = _project_name(project)
+    source = resolve_under(INCOMING_ROOT, "users", owner_id, project_name)
+    destination = resolve_under(KNOWLEDGE_ROOT, "users", owner_id, project_name)
+    if not source.is_dir():
+        raise FileNotFoundError(f"incoming projectが見つかりません: {project_name}")
+    if destination.exists():
+        raise FileExistsError("保存済み原本が存在します。自動上書きは行いません")
     if not _REGISTER_LOCK.acquire(blocking=False):
-        raise RuntimeError("別のナレッジを登録中です。しばらくしてから再度実行してください。")
+        raise RuntimeError("別のナレッジを登録中です。しばらくしてから再度実行してください")
     try:
-        if destination.exists():
-            raise FileExistsError(
-                f"保存済み原本が存在します。自動上書きしません: {destination}. "
-                "Qdrantだけ再構築する場合はindex_stored_projectを使用してください。"
-            )
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, destination)
-        result = index_directory(
-            destination,
-            shared=False,
-            owner=owner_id,
-            project_id=project_id or sanitize_identifier(project_dir),
-        )
-        return {"source": str(destination), "incoming_preserved": True, **result}
+        from kb_index import index_directory
+
+        result = index_directory(destination, owner=owner_id, project_id=project_id)
+        return {"status": "completed", "source_preserved": True, "stored_path": str(destination), **result}
     finally:
         _REGISTER_LOCK.release()
 
 
-def index_stored_project(owner: str, project: str, project_id: str | None = None) -> dict[str, Any]:
-    """Rebuild Qdrant from an already stored original without modifying files."""
+def reindex_stored_project(owner: str, project: str, project_id: str | None = None) -> dict[str, Any]:
     owner_id = sanitize_identifier(owner)
-    project_dir = project.strip()
-    if not project_dir or Path(project_dir).name != project_dir:
-        raise ValueError("projectには個人Knowledge領域直下のフォルダ名を指定してください")
-
-    root = (KNOWLEDGE_ROOT / "users" / owner_id).resolve()
-    source = (root / project_dir).resolve()
-    if not source.is_relative_to(root) or not source.is_dir():
-        raise FileNotFoundError(f"保存済み原本が見つかりません: {source}")
-
+    project_name = _project_name(project)
+    source = resolve_under(KNOWLEDGE_ROOT, "users", owner_id, project_name)
+    if not source.is_dir():
+        raise FileNotFoundError(f"保存済みprojectが見つかりません: {project_name}")
     if not _REGISTER_LOCK.acquire(blocking=False):
-        raise RuntimeError("別のナレッジを登録中です。しばらくしてから再度実行してください。")
+        raise RuntimeError("別のナレッジを登録中です。しばらくしてから再度実行してください")
     try:
-        return index_directory(
-            source,
-            shared=False,
-            owner=owner_id,
-            project_id=project_id or sanitize_identifier(project_dir),
-        )
+        from kb_index import index_directory
+
+        result = index_directory(source, owner=owner_id, project_id=project_id)
+        return {"status": "completed", "source_preserved": True, **result}
     finally:
         _REGISTER_LOCK.release()
