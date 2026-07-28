@@ -1,124 +1,90 @@
 services:
-  # ===========================================================================
-  # Open WebUI
-  # ===========================================================================
   open-webui:
     image: ghcr.io/open-webui/open-webui:v0.10.2
     container_name: open-webui
-
     ports:
       - "${OPENWEBUI_PORT:-3000}:8080"
-
     volumes:
       - ./open-webui:/app/backend/data
-
     environment:
-      # -----------------------------------------------------------------------
-      # Open WebUIからLiteLLMへ接続
-      #
-      # Docker内部の接続先なので、.envのlocalhost向けURLは使わず、
-      # Composeのサービス名を直接指定する。
-      # -----------------------------------------------------------------------
       OPENAI_API_BASE_URL: http://litellm:4000/v1
       OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
-
-      # -----------------------------------------------------------------------
-      # RAG検索クエリのEmbedding
-      #
-      # kb-indexと同じEMBEDDING_MODELを使用する。
-      # 登録時と検索時でEmbeddingモデルが異なると検索できない。
-      # -----------------------------------------------------------------------
       RAG_EMBEDDING_ENGINE: openai
       RAG_OPENAI_API_BASE_URL: http://litellm:4000/v1
       RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
       RAG_EMBEDDING_MODEL: ${EMBEDDING_MODEL}
-
-      # -----------------------------------------------------------------------
-      # Open WebUI本体
-      # -----------------------------------------------------------------------
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
       ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
-
-      # -----------------------------------------------------------------------
-      # RAG検索設定
-      # -----------------------------------------------------------------------
       RAG_TOP_K: ${RAG_TOP_K:-5}
-
-      # -----------------------------------------------------------------------
-      # Open WebUI自身が作る通常KnowledgeもQdrantへ保存する場合だけ有効化
-      #
-      # External Knowledge Sourcesからkb-index作成済みCollectionを読むだけ
-      # なら不要。
-      # -----------------------------------------------------------------------
-      # VECTOR_DB: qdrant
-      # QDRANT_URI: http://qdrant:6333
-      # QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
     depends_on:
       - litellm
       - qdrant
-
     restart: unless-stopped
 
+  knowledge-read-mcp:
+    build: .
+    command: kb-read-mcp
+    ports:
+      - "127.0.0.1:${KB_READ_MCP_PORT:-8000}:8000"
+    environment: &knowledge-env
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      LITELLM_API_BASE: http://litellm:4000/v1
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      KNOWLEDGE_ROOT: /knowledge
+      KNOWLEDGE_LOGICAL_ROOT: ${KNOWLEDGE_LOGICAL_ROOT:-labknowledge://}
+    volumes:
+      - ${KNOWLEDGE_HOST_PATH:-/mnt/knowledge}:/knowledge:ro
+    depends_on:
+      - litellm
+      - qdrant
+    restart: unless-stopped
 
-  # ===========================================================================
-  # LiteLLM
-  # ===========================================================================
+  knowledge-register-mcp:
+    build: .
+    command: kb-register-mcp
+    ports:
+      - "127.0.0.1:${KB_REGISTER_MCP_PORT:-8001}:8001"
+    environment:
+      <<: *knowledge-env
+      INCOMING_ROOT: /incoming
+    volumes:
+      - ${KNOWLEDGE_HOST_PATH:-/mnt/knowledge}:/knowledge:rw
+      - ${INCOMING_HOST_PATH:-/mnt/knowledge-incoming}:/incoming:ro
+    depends_on:
+      - litellm
+      - qdrant
+    restart: unless-stopped
+
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     container_name: litellm
-
-    # ホスト側のkb-indexから利用するため、localhostにだけ公開する。
-    # 将来、登録もすべてコンテナ内またはOpen WebUI経由にする場合は削除可能。
     ports:
       - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
-
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
-
     command:
       - "--config=/app/config.yaml"
-
-    # Provider APIキーを含め、LiteLLMが必要とする値を渡す。
     env_file:
       - .env
-
     depends_on:
       - tei
-
     restart: unless-stopped
 
-
-  # ===========================================================================
-  # Qdrant
-  # ===========================================================================
   qdrant:
     image: qdrant/qdrant:v1.17.0
     container_name: qdrant
-
-    # ホスト側のkb-indexと管理者用Dashboardから利用するため、
-    # localhostにだけ公開する。
     ports:
       - "127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333"
-
     volumes:
       - qdrant_data:/qdrant/storage
-
     restart: unless-stopped
 
-
-  # ===========================================================================
-  # Hugging Face Text Embeddings Inference
-  #
-  # kb-indexとOpen WebUIのRAG検索で利用するEmbeddingサーバ。
-  # LiteLLMからOpenAI互換APIとして呼び出す。
-  #
-  # ホストへ公開する必要はない。
-  # ===========================================================================
   tei:
     image: ghcr.io/huggingface/text-embeddings-inference:cuda-1.9
     container_name: tei
-
     command:
       - --model-id
       - BAAI/bge-m3
@@ -127,74 +93,17 @@ services:
       - --max-client-batch-size
       - "16"
       - --auto-truncate
-
     volumes:
       - hf_cache:/data
-
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: all
-              capabilities:
-                - gpu
-
+              capabilities: [gpu]
     restart: unless-stopped
 
-
-  # ===========================================================================
-  # filesystem-knowledge-bridge MCP server
-  #
-  # Initial version:
-  # - Searches Qdrant across shared + the requested owner's private collections
-  # - Accepts ZIP uploads through a generic HTTP API
-  # - Preserves uploaded ZIP files and installed source projects
-  # - Never overwrites or deletes an existing source project
-  # ===========================================================================
-  knowledge-bridge:
-    build: .
-    container_name: knowledge-bridge
-
-    environment:
-      QDRANT_URL: http://qdrant:6333
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-      LITELLM_API_BASE: http://litellm:4000/v1
-      LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
-      KNOWLEDGE_LOGICAL_ROOT: ${KNOWLEDGE_LOGICAL_ROOT:-labknowledge://}
-      KNOWLEDGE_ROOT: /knowledge
-      MCP_HOST: 0.0.0.0
-      MCP_PORT: ${MCP_PORT:-8000}
-      KB_SEARCH_LIMIT: ${KB_SEARCH_LIMIT:-5}
-      KB_SEARCH_MAX_LIMIT: ${KB_SEARCH_MAX_LIMIT:-10}
-      KB_SOURCE_MAX_LINES: ${KB_SOURCE_MAX_LINES:-400}
-      KB_MAX_UPLOAD_BYTES: ${KB_MAX_UPLOAD_BYTES:-2147483648}
-      KB_MAX_EXTRACTED_BYTES: ${KB_MAX_EXTRACTED_BYTES:-5368709120}
-      KB_MAX_ARCHIVE_FILES: ${KB_MAX_ARCHIVE_FILES:-100000}
-
-    volumes:
-      - ${KNOWLEDGE_HOST_ROOT:-./knowledge}:/knowledge:rw
-
-    # Open WebUI connects through the Docker network at:
-    # http://knowledge-bridge:8000/mcp
-    expose:
-      - "8000"
-
-    # ホストからAPIを直接試験するときだけ一時的に有効化する。
-    # ports:
-    #   - "127.0.0.1:8000:8000"
-
-    depends_on:
-      - litellm
-      - qdrant
-
-    restart: unless-stopped
-
-
-# =============================================================================
-# Docker Composeのボリューム定義
-# =============================================================================
 volumes:
   qdrant_data:
   hf_cache:

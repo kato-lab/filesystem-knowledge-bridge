@@ -431,19 +431,6 @@ main.pyは何をするプログラムですか？
 
 正常に動作していれば、登録したプロジェクトの内容に基づく回答とSource表示を確認できます。
 
-# HTTP APIからの個人Knowledge登録
-
-専用UIは提供せず、汎用のZIP登録APIを提供します。次の例は同じDockerネットワーク内のクライアントから呼ぶ場合です。
-
-```bash
-curl -X POST http://knowledge-bridge:8000/api/projects/upload \
-  -H "X-Knowledge-Owner: alice" \
-  -F "project=project-a" \
-  -F "file=@project-a.zip"
-```
-
-同名の原本が存在する場合は上書きせず、HTTP 409を返します。登録処理は原本を自動削除しません。
-
 # 対応ファイル形式
 
 - Markdown：`.md`、`.markdown`
@@ -463,3 +450,60 @@ curl -X POST http://knowledge-bridge:8000/api/projects/upload \
 # ライセンス
 
 MIT
+
+# MCPサービス（v0.2.0）
+
+v0.2.0では、同じコードとDockerイメージから二つのMCPサービスを起動します。
+
+```text
+knowledge-read-mcp       検索・一覧・原本参照
+knowledge-register-mcp   incoming取込・Qdrant登録
+```
+
+## 読み取りMCP
+
+接続先：`http://<host>:8000/mcp`
+
+- `search_knowledge`
+- `list_knowledge_projects`
+- `read_knowledge_source`
+
+原本領域は読み取り専用でマウントします。
+
+## 登録MCP
+
+接続先：`http://<host>:8001/mcp`
+
+- `list_incoming`
+- `register_incoming_project`
+- `reindex_stored_project`
+
+一般ユーザーは、あらかじめ次の場所へ展開済みプロジェクトを置きます。
+
+```text
+/incoming/users/<owner>/<project>/
+```
+
+`register_incoming_project` はincomingを削除せず、次へコピーしてから登録します。
+
+```text
+/knowledge/users/<owner>/<project>/
+```
+
+同名の保存済み原本がある場合は自動上書きせず、エラーを返します。Qdrant登録に失敗した場合は、保存済み原本を使って `reindex_stored_project` を再実行できます。
+
+## 起動
+
+```bash
+docker compose -f docker-compose.yml.example up -d --build \
+  knowledge-read-mcp knowledge-register-mcp
+```
+
+ownerは初期版では次のHTTPヘッダーから取得します。
+
+```text
+X-Knowledge-Owner
+X-OpenWebUI-User-Name
+```
+
+これは完全な認証機構ではありません。信頼できる内部ネットワークでのみ利用してください。

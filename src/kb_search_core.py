@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import unquote, urlparse
 
-from llama_index.embeddings.openai_like import OpenAILikeEmbedding
+import httpx
 from qdrant_client import QdrantClient
 
-from kb_index import (
+from kb_common import (
     EMBEDDING_MODEL,
     KNOWLEDGE_LOGICAL_ROOT,
+    KNOWLEDGE_ROOT,
     LITELLM_API_BASE,
     LITELLM_API_KEY,
     QDRANT_API_KEY,
@@ -20,16 +21,15 @@ from kb_index import (
     sanitize_identifier,
 )
 
-KNOWLEDGE_ROOT = Path(os.environ.get("KNOWLEDGE_ROOT", "/knowledge")).expanduser()
 DEFAULT_SEARCH_LIMIT = int(os.environ.get("KB_SEARCH_LIMIT", "5"))
 MAX_SEARCH_LIMIT = int(os.environ.get("KB_SEARCH_MAX_LIMIT", "10"))
 MAX_SOURCE_LINES = int(os.environ.get("KB_SOURCE_MAX_LINES", "400"))
 
 READABLE_EXTENSIONS = {
-    ".md", ".markdown", ".txt", ".rst", ".yaml", ".yml", ".json",
-    ".csv", ".toml", ".ini", ".cfg", ".tex", ".py", ".js", ".jsx",
-    ".ts", ".tsx", ".java", ".c", ".h", ".cpp", ".cc", ".cxx",
-    ".hpp", ".cs", ".go", ".rs", ".rb", ".php",
+    ".md", ".markdown", ".txt", ".rst", ".yaml", ".yml", ".json", ".csv",
+    ".toml", ".ini", ".cfg", ".tex", ".py", ".js", ".jsx", ".ts", ".tsx",
+    ".java", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".cs", ".go",
+    ".rs", ".rb", ".php",
 }
 
 
@@ -55,16 +55,17 @@ def make_qdrant_client() -> QdrantClient:
     return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
 
-def make_query_embedder() -> OpenAILikeEmbedding:
+def embed_query(query: str) -> list[float]:
     if not LITELLM_API_KEY:
         raise RuntimeError("LITELLM_API_KEYが未設定です")
-    return OpenAILikeEmbedding(
-        model_name=EMBEDDING_MODEL,
-        api_base=LITELLM_API_BASE,
-        api_key=LITELLM_API_KEY,
-        embed_batch_size=10,
-        additional_kwargs={"encoding_format": "float"},
+    response = httpx.post(
+        f"{LITELLM_API_BASE}/embeddings",
+        headers={"Authorization": f"Bearer {LITELLM_API_KEY}"},
+        json={"model": EMBEDDING_MODEL, "input": query, "encoding_format": "float"},
+        timeout=120,
     )
+    response.raise_for_status()
+    return response.json()["data"][0]["embedding"]
 
 
 def _collection_names(client: QdrantClient) -> list[str]:
@@ -80,71 +81,47 @@ def accessible_collections(client: QdrantClient, owner: str) -> list[str]:
     ]
 
 
-def _project_matches_collection(collection: str, project: str, owner: str) -> bool:
-    project_id = sanitize_identifier(project)
-    owner_id = sanitize_identifier(owner)
-    return collection in {
-        f"shared_{project_id}",
-        f"private_{owner_id}_{project_id}",
-    }
-
-
-def resolve_collections(
-    client: QdrantClient,
-    owner: str,
-    projects: Iterable[str] | None = None,
-) -> list[str]:
+def resolve_collections(client: QdrantClient, owner: str, projects: Iterable[str] | None = None) -> list[str]:
     allowed = accessible_collections(client, owner)
-    requested = [p for p in (projects or []) if p and p.strip()]
+    requested = [sanitize_identifier(p) for p in (projects or []) if p and p.strip()]
     if not requested:
         return allowed
 
-    resolved: list[str] = []
-    missing: list[str] = []
-    for project in requested:
-        matches = [
-            collection for collection in allowed
-            if _project_matches_collection(collection, project, owner)
-        ]
-        if not matches:
-            missing.append(project)
-        else:
-            resolved.extend(matches)
-
+    selected = [
+        name for name in allowed
+        if any(name in {f"shared_{project}", f"private_{sanitize_identifier(owner)}_{project}"} for project in requested)
+    ]
+    missing = [
+        project for project in requested
+        if not any(name in {f"shared_{project}", f"private_{sanitize_identifier(owner)}_{project}"} for name in allowed)
+    ]
     if missing:
         raise ValueError(f"参照可能なプロジェクトが見つかりません: {', '.join(missing)}")
-    return sorted(set(resolved))
+    return sorted(set(selected))
 
 
 def _payload_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     metadata = payload.get("metadata")
-    if isinstance(metadata, dict):
-        # kb-index stores Open WebUI-facing metadata under metadata.metadata.
-        nested = metadata.get("metadata")
-        if isinstance(nested, dict):
-            return {**metadata, **nested}
-        return metadata
-    return {}
+    if not isinstance(metadata, dict):
+        return {}
+    nested = metadata.get("metadata")
+    return {**metadata, **nested} if isinstance(nested, dict) else metadata
 
 
 def _payload_text(payload: dict[str, Any]) -> str:
-    direct = payload.get("text")
-    if isinstance(direct, str):
-        return direct
-
+    if isinstance(payload.get("text"), str):
+        return payload["text"]
     metadata = payload.get("metadata")
     if isinstance(metadata, dict) and isinstance(metadata.get("text"), str):
         return metadata["text"]
-
     raw_node = payload.get("_node_content")
     if isinstance(raw_node, str):
         try:
             node = json.loads(raw_node)
             text = node.get("text") or node.get("text_resource", {}).get("text")
-            if isinstance(text, str):
-                return text
+            return text if isinstance(text, str) else ""
         except json.JSONDecodeError:
-            pass
+            return ""
     return ""
 
 
@@ -166,10 +143,8 @@ def search_knowledge(
     if not collections:
         return []
 
-    vector = make_query_embedder().get_query_embedding(query)
+    vector = embed_query(query)
     results: list[SearchResult] = []
-
-    # Each collection contributes candidates, but only the global top-k is returned.
     for collection in collections:
         response = qdrant.query_points(
             collection_name=collection,
@@ -181,62 +156,49 @@ def search_knowledge(
         for point in response.points:
             payload = point.payload or {}
             metadata = _payload_metadata(payload)
-            results.append(
-                SearchResult(
-                    score=float(point.score),
-                    collection=collection,
-                    project_id=str(metadata.get("project_id", "")),
-                    project_name=str(metadata.get("project_name", metadata.get("project_id", ""))),
-                    scope=str(metadata.get("scope", "")),
-                    owner=str(metadata.get("owner", "")),
-                    relative_path=str(metadata.get("relative_path", "")),
-                    logical_path=str(metadata.get("logical_path", "")),
-                    source_ref=str(metadata.get("source_ref", metadata.get("logical_path", ""))),
-                    chunk_index=int(metadata.get("chunk_index", 0) or 0),
-                    text=_payload_text(payload),
-                )
-            )
+            results.append(SearchResult(
+                score=float(point.score),
+                collection=collection,
+                project_id=str(metadata.get("project_id", "")),
+                project_name=str(metadata.get("project_name", metadata.get("project_id", ""))),
+                scope=str(metadata.get("scope", "")),
+                owner=str(metadata.get("owner", "")),
+                relative_path=str(metadata.get("relative_path", "")),
+                logical_path=str(metadata.get("logical_path", "")),
+                source_ref=str(metadata.get("source_ref", metadata.get("logical_path", ""))),
+                chunk_index=int(metadata.get("chunk_index", 0) or 0),
+                text=_payload_text(payload),
+            ))
 
     results.sort(key=lambda item: item.score, reverse=True)
     return results[:limit]
 
 
-def _collection_summary(client: QdrantClient, collection: str) -> dict[str, Any]:
-    points, _ = client.scroll(
-        collection_name=collection,
-        limit=1,
-        with_payload=True,
-        with_vectors=False,
-    )
-    metadata: dict[str, Any] = {}
-    if points:
-        metadata = _payload_metadata(points[0].payload or {})
-    return {
-        "collection": collection,
-        "project_id": str(metadata.get("project_id", "")),
-        "project_name": str(metadata.get("project_name", metadata.get("project_id", ""))),
-        "scope": str(metadata.get("scope", "shared" if collection.startswith("shared_") else "personal")),
-        "owner": str(metadata.get("owner", "shared")),
-    }
-
-
 def list_knowledge_projects(owner: str, *, client: QdrantClient | None = None) -> list[dict[str, Any]]:
     qdrant = client or make_qdrant_client()
-    return [_collection_summary(qdrant, name) for name in accessible_collections(qdrant, owner)]
+    projects = []
+    for collection in accessible_collections(qdrant, owner):
+        points, _ = qdrant.scroll(collection_name=collection, limit=1, with_payload=True, with_vectors=False)
+        metadata = _payload_metadata(points[0].payload or {}) if points else {}
+        projects.append({
+            "collection": collection,
+            "project_id": str(metadata.get("project_id", "")),
+            "project_name": str(metadata.get("project_name", metadata.get("project_id", ""))),
+            "scope": str(metadata.get("scope", "shared" if collection.startswith("shared_") else "personal")),
+            "owner": str(metadata.get("owner", "shared")),
+        })
+    return projects
 
 
 def _resolve_source_path(source_ref: str, owner: str) -> Path:
     parsed = urlparse(source_ref)
-    expected_logical_scheme = urlparse(KNOWLEDGE_LOGICAL_ROOT).scheme or "labknowledge"
-    if parsed.scheme not in {expected_logical_scheme, "kbsource"}:
+    expected_scheme = urlparse(KNOWLEDGE_LOGICAL_ROOT).scheme or "labknowledge"
+    if parsed.scheme not in {expected_scheme, "kbsource"}:
         raise ValueError("このシステムが発行したsource_refではありません")
 
-    # kbsource preserves the actual source directory. labknowledge is retained
-    # as a compatibility fallback for collections created by v0.1.
-    if parsed.netloc:
-        parts = [unquote(parsed.netloc), *[unquote(p) for p in parsed.path.split("/") if p]]
-    else:
-        parts = [unquote(p) for p in parsed.path.split("/") if p]
+    parts = [unquote(parsed.netloc), *[unquote(p) for p in parsed.path.split("/") if p]] if parsed.netloc else [
+        unquote(p) for p in parsed.path.split("/") if p
+    ]
     if len(parts) < 3:
         raise ValueError("logical_pathの形式が不正です")
 
@@ -261,17 +223,12 @@ def _resolve_source_path(source_ref: str, owner: str) -> Path:
     return target
 
 
-def read_knowledge_source(
-    source_ref: str,
-    owner: str,
-    start_line: int = 1,
-    max_lines: int = 200,
-) -> dict[str, Any]:
+def read_knowledge_source(source_ref: str, owner: str, start_line: int = 1, max_lines: int = 200) -> dict[str, Any]:
     target = _resolve_source_path(source_ref, owner)
     if not target.is_file():
         raise FileNotFoundError(f"原本が見つかりません: {source_ref}")
     if target.suffix.lower() not in READABLE_EXTENSIONS:
-        raise ValueError(f"初期版では原本参照に対応していない形式です: {target.suffix.lower()}")
+        raise ValueError(f"原本参照に対応していない形式です: {target.suffix.lower()}")
 
     start_line = max(1, int(start_line))
     max_lines = max(1, min(int(max_lines), MAX_SOURCE_LINES))
