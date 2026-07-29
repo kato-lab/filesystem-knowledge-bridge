@@ -155,7 +155,7 @@ async def command_register(args: argparse.Namespace) -> None:
         },
     )
     if result_is_error(result):
-        raise RuntimeError("最初の登録がエラーになりました")
+        raise RuntimeError("登録に失敗しました")
 
     if args.check_duplicate:
         duplicate = await call_tool(
