@@ -46,10 +46,8 @@ def read_knowledge_source(
 
 
 def main() -> None:
-    host = os.environ.get("MCP_HOST", "0.0.0.0")
-    port = int(os.environ.get("MCP_PORT", "8000"))
-    mcp.settings.host = host
-    mcp.settings.port = port
+    mcp.settings.host = os.environ.get("MCP_HOST", "0.0.0.0")
+    mcp.settings.port = int(os.environ.get("MCP_PORT", "8000"))
     mcp.run(transport="streamable-http")
 
 

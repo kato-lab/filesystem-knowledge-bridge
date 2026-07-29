@@ -11,7 +11,7 @@ LITELLM_API_KEY = os.environ.get("LITELLM_API_KEY", "")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "lab-embedding")
 KNOWLEDGE_ROOT = Path(os.environ.get("KNOWLEDGE_ROOT", "/knowledge"))
 INCOMING_ROOT = Path(os.environ.get("INCOMING_ROOT", "/incoming"))
-KNOWLEDGE_LOGICAL_ROOT = os.environ.get("KNOWLEDGE_LOGICAL_ROOT", "labknowledge://").rstrip("/") + "/"
+KNOWLEDGE_LOGICAL_ROOT = os.environ.get("KNOWLEDGE_LOGICAL_ROOT", "labknowledge://")
 
 
 def sanitize_identifier(value: str, max_length: int = 120) -> str:
@@ -28,7 +28,8 @@ def collection_name_for(project_id: str, shared: bool, owner: str) -> str:
 
 def logical_path_for(relative_path: str, project_id: str, shared: bool, owner: str) -> str:
     prefix = f"shared/{project_id}" if shared else f"users/{owner}/{project_id}"
-    return f"{KNOWLEDGE_LOGICAL_ROOT}{prefix}/{relative_path}"
+    root = KNOWLEDGE_LOGICAL_ROOT.rstrip("/")
+    return f"{root}//{prefix}/{relative_path.lstrip('/')}"
 
 
 def resolve_under(root: Path, *parts: str) -> Path:

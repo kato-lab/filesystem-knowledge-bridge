@@ -32,11 +32,8 @@ def reindex_stored_project(owner: str, project: str, project_id: str | None = No
 
 
 def main() -> None:
-    host = os.environ.get("MCP_HOST", "0.0.0.0")
-    port = int(os.environ.get("MCP_PORT", "8001"))
-
-    mcp.settings.host = host
-    mcp.settings.port = port
+    mcp.settings.host = os.environ.get("MCP_HOST", "0.0.0.0")
+    mcp.settings.port = int(os.environ.get("MCP_PORT", "8001"))
     mcp.run(transport="streamable-http")
 
 
