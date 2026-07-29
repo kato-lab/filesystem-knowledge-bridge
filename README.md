@@ -177,3 +177,15 @@ See [MCP_TEST.ja.md](MCP_TEST.ja.md).
 ## License
 
 MIT License
+
+
+### Connecting from Open WebUI or another container
+
+The MCP HTTP transport validates the Host header. If you rename a Docker service, update the allowed hosts in `.env` as well.
+
+```dotenv
+KNOWLEDGE_READ_MCP_ALLOWED_HOSTS=knowledge-read-mcp:8000,localhost:8000,127.0.0.1:8000
+KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS=knowledge-register-mcp:8001,localhost:8001,127.0.0.1:8001
+```
+
+Compose passes these values to each container as `MCP_ALLOWED_HOSTS`; service names are not hard-coded in Python.

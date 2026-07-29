@@ -4,7 +4,13 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("filesystem-knowledge-bridge register", json_response=True)
+from kb_common import create_transport_security
+
+mcp = FastMCP(
+    "filesystem-knowledge-bridge register",
+    json_response=True,
+    transport_security=create_transport_security(8001),
+)
 
 
 @mcp.tool()

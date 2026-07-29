@@ -237,3 +237,15 @@ incomingのプロジェクトを次へコピーし、個人Knowledgeとして登
 ## ライセンス
 
 MIT License
+
+
+### Open WebUIなど別コンテナから接続する場合
+
+MCPのHTTP transportはHostヘッダーを検証します。Dockerサービス名を変更した場合は、`.env` の許可ホストも合わせて変更してください。
+
+```dotenv
+KNOWLEDGE_READ_MCP_ALLOWED_HOSTS=knowledge-read-mcp:8000,localhost:8000,127.0.0.1:8000
+KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS=knowledge-register-mcp:8001,localhost:8001,127.0.0.1:8001
+```
+
+設定値はComposeから各コンテナの `MCP_ALLOWED_HOSTS` へ渡されます。サービス名はPythonソースには固定していません。

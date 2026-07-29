@@ -159,7 +159,9 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
       KNOWLEDGE_ROOT: /knowledge
       KNOWLEDGE_LOGICAL_ROOT: ${KNOWLEDGE_LOGICAL_ROOT:-labknowledge://}
+      MCP_HOST: 0.0.0.0
       MCP_PORT: 8000
+      MCP_ALLOWED_HOSTS: ${KNOWLEDGE_READ_MCP_ALLOWED_HOSTS:-knowledge-read-mcp:8000,localhost:8000,127.0.0.1:8000}
     volumes:
       - ${KNOWLEDGE_HOST_ROOT:-/mnt/knowledge}:/knowledge:ro
     depends_on:
@@ -184,7 +186,9 @@ services:
       KNOWLEDGE_ROOT: /knowledge
       INCOMING_ROOT: /incoming
       KNOWLEDGE_LOGICAL_ROOT: ${KNOWLEDGE_LOGICAL_ROOT:-labknowledge://}
+      MCP_HOST: 0.0.0.0
       MCP_PORT: 8001
+      MCP_ALLOWED_HOSTS: ${KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS:-knowledge-register-mcp:8001,localhost:8001,127.0.0.1:8001}
     volumes:
       - ${KNOWLEDGE_HOST_ROOT:-/mnt/knowledge}:/knowledge:rw
       - ${KNOWLEDGE_INCOMING_HOST_ROOT:-/mnt/knowledge-incoming}:/incoming:ro
