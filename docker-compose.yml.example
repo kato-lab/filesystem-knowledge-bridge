@@ -197,6 +197,29 @@ services:
       - litellm
     restart: unless-stopped
 
+
+  # ===========================================================================
+  # Knowledge Upload API
+  #
+  # ZIPを受け取り、incomingへ安全に展開するだけのサービス。
+  # 登録・インデックス作成はKnowledge Register MCPが担当する。
+  # ===========================================================================
+  knowledge-upload-api:
+    build: .
+    command: kb-upload-api
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_UPLOAD_API_PORT:-8002}:8002"
+    environment:
+      INCOMING_ROOT: /incoming
+      UPLOAD_HOST: 0.0.0.0
+      UPLOAD_PORT: 8002
+      UPLOAD_MAX_BYTES: ${KNOWLEDGE_UPLOAD_MAX_BYTES:-536870912}
+      UPLOAD_MAX_EXTRACTED_BYTES: ${KNOWLEDGE_UPLOAD_MAX_EXTRACTED_BYTES:-2147483648}
+      UPLOAD_MAX_FILES: ${KNOWLEDGE_UPLOAD_MAX_FILES:-20000}
+    volumes:
+      - ${KNOWLEDGE_INCOMING_HOST_ROOT:-/mnt/knowledge-incoming}:/incoming:rw
+    restart: unless-stopped
+
 # =============================================================================
 # Docker Composeのボリューム定義
 # =============================================================================

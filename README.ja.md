@@ -249,3 +249,19 @@ KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS=knowledge-register-mcp:8001,localhost:8001,
 ```
 
 設定値はComposeから各コンテナの `MCP_ALLOWED_HOSTS` へ渡されます。サービス名はPythonソースには固定していません。
+
+## Open WebUIからZIPをアップロードして登録する
+
+v0.3.0では、ZIPを`incoming`へ配置するだけの`knowledge-upload-api`を追加しています。
+Uploaderは登録やインデックス作成を行いません。Open WebUIの登録専用モデルが、次の2つのToolを順に呼び出します。
+
+```text
+添付ZIPあり:
+  Knowledge Project Uploader.upload_project
+    → Knowledge Register.register_incoming_project
+
+添付ZIPなし:
+  Knowledge Register.register_incoming_project
+```
+
+Open WebUI用Workspace Toolの例は`openwebui/knowledge_uploader_tool.py`、設定・試験手順は`UPLOAD_TEST.ja.md`を参照してください。

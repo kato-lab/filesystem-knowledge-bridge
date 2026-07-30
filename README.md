@@ -189,3 +189,18 @@ KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS=knowledge-register-mcp:8001,localhost:8001,
 ```
 
 Compose passes these values to each container as `MCP_ALLOWED_HOSTS`; service names are not hard-coded in Python.
+
+## Uploading and registering a ZIP from Open WebUI
+
+v0.3.0 adds `knowledge-upload-api`, which only receives a ZIP archive and places its extracted contents in `incoming`. It does not register or index the project. A registration-focused Open WebUI model calls the tools in sequence:
+
+```text
+With an attached ZIP:
+  Knowledge Project Uploader.upload_project
+    -> Knowledge Register.register_incoming_project
+
+Without an attachment:
+  Knowledge Register.register_incoming_project
+```
+
+See `openwebui/knowledge_uploader_tool.py` for the Workspace Tool example and `UPLOAD_TEST.ja.md` for setup and test steps.
