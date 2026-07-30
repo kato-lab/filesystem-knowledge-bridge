@@ -32,7 +32,7 @@ cd ..
 
 ```bash
 curl -fsS -X POST http://localhost:8002/uploads/projects \
-  -F owner=tkato \
+  -F owner=alice \
   -F project=sample-project-upload \
   -F archive=@sample-project-upload.zip
 ```
@@ -43,16 +43,16 @@ curl -fsS -X POST http://localhost:8002/uploads/projects \
 {
   "status": "uploaded",
   "source_preserved": true,
-  "owner": "tkato",
+  "owner": "alice",
   "project": "sample-project-upload",
-  "incoming_path": "/incoming/users/tkato/sample-project-upload"
+  "incoming_path": "/incoming/users/alice/sample-project-upload"
 }
 ```
 
 ホスト側でも確認します。
 
 ```bash
-test -d /mnt/knowledge-incoming/users/tkato/sample-project-upload
+test -d /mnt/knowledge-incoming/users/alice/sample-project-upload
 ```
 
 同じprojectへ再アップロードすると、上書きせず `409 Conflict` になることを確認します。
@@ -162,13 +162,13 @@ sample-project-incomingを登録してください
 
 ```bash
 curl -i -X POST http://localhost:8002/uploads/projects \
-  -F owner=tkato \
-  -F 'project=引き継ぎ資料_2025年度_末永栞奈' \
+  -F owner=alice \
+  -F 'project=引き継ぎ資料_2025年度_アリス' \
   -F archive=@handover.zip
 ```
 
 期待結果:
 
-- incomingフォルダ名が`引き継ぎ資料_2025年度_末永栞奈`のまま保持される
+- incomingフォルダ名が`引き継ぎ資料_2025年度_アリス`のまま保持される
 - Uploaderは`project_id`を生成しない
 - 続くRegister MCP呼び出しでUUIDの`project_id`が生成される

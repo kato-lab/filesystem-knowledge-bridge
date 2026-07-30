@@ -277,9 +277,9 @@ Open WebUI用Workspace Toolの例は`openwebui/knowledge_uploader_tool.py`、設
 
 ```json
 {
-  "project": "引き継ぎ資料_2025年度_末永栞奈",
+  "project": "引き継ぎ資料_2025年度_アリス",
   "project_id": "0c596ad3-4eb4-4699-ae14-f6e2e5c59c7d",
-  "owner": "tkato",
+  "owner": "alice",
   "scope": "personal"
 }
 ```
