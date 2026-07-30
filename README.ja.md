@@ -1,452 +1,287 @@
 # filesystem-knowledge-bridge
 
-フリーズ済みのプロジェクトフォルダをQdrantのCollectionとして登録し、Open WebUIのExternal Knowledge Sourcesから利用するための軽量インデクサです。
+**filesystem-knowledge-bridge** は、フリーズ済みのプロジェクトフォルダを **Qdrant Collection** として登録し、CLI や MCP から検索・閲覧できる軽量なナレッジ管理・検索ツールです。
 
-> システム全体を作り直さず、既存のRAGコンポーネントを活用し、プロジェクト登録部分だけを最適化します。
+> **フリーズ済みプロジェクト**とは、開発や編集が一段落し、特定バージョンとして内容を固定したプロジェクトを指します。本ツールでは、このようなプロジェクトをナレッジとして登録・管理することを想定しています。
 
-English documentation: [README.md](README.md)
+ソースコード、Markdown、PDF、Office文書などをインデックス化し、プロジェクト単位でナレッジを管理します。検索結果から必要に応じて原本ファイルを参照できるため、AIエージェントやチャットシステムの知識基盤として利用できます。
 
-## 概要
+本プロジェクトはナレッジの登録・検索・閲覧に特化しており、Open WebUIなど特定のUIには依存しません。
 
-```text
-フリーズ済みプロジェクト
-        │
-        ▼
-     kb-index
-        │
-        ├── LiteLLM ── TEI / BGE-M3
-        │
-        ▼
-      Qdrant
-        │
-        ▼
-Open WebUI External Knowledge Sources
-```
+## 主な機能
 
-独自の検索サーバは用意しません。Open WebUIがQdrantのCollectionを直接検索します。
+- 1プロジェクトを1つのQdrant Collectionとして登録
+- 共有ナレッジと個人ナレッジを分離
+- `kb-index`による管理者向け登録
+- `kb-search`によるCLI検索
+- 読み取りMCPによる検索・一覧・原本参照
+- 登録MCPによるincomingフォルダからの登録・再登録
+- 原本ファイルをQdrantへ格納せず、ファイルシステム上に保持
 
-## 特徴
-
-- プロジェクト名・相対パスなどの構造情報を保持
-- 原則として1プロジェクトを1つのQdrant Collectionへ登録
-- 共有Knowledgeと個人Knowledgeに対応
-- Markdown、ソースコード、テキスト、PDF、DOCX、PPTXに対応
-- ファイル形式に応じたチャンク分割
-- LiteLLMのOpenAI互換APIを通じてEmbeddingを生成
-- Open WebUIが直接読める`text`・`metadata`をpayloadへ保存
-- 再登録時は既存Collectionを削除して全置換
-- ホスト側CLIと、必要に応じたコンテナ実行に対応
-
-## 必要環境
-
-- LinuxまたはmacOS
-- Python 3.11以降
-- [uv](https://docs.astral.sh/uv/)
-- DockerおよびDocker Compose
-- Open WebUI 0.10.2以降
-- LiteLLM Proxy
-- Qdrant
-- TEI上の`BAAI/bge-m3`などのEmbeddingモデル
-
-# 1. `kb-index`のインストール
-
-## 1.1 ローカルユーザーへのインストール
-
-```bash
-uv tool install .
-```
-
-実行ファイルは通常、次へ配置されます。
+## 構成
 
 ```text
-~/.local/bin/kb-index
+管理者CLI
+├── kb-index
+└── kb-search
+
+AIクライアント
+├── Read MCP
+│   ├── search_knowledge
+│   ├── list_knowledge_projects
+│   └── read_knowledge_source
+└── Register MCP
+    ├── list_incoming
+    ├── register_incoming_project
+    └── reindex_stored_project
+
+                    ┌──────────┐
+                    │ Qdrant   │
+                    └──────────┘
+                         ▲
+                         │
+              filesystem-knowledge-bridge
+                         │
+       ┌─────────────────┴─────────────────┐
+       │                                   │
+/knowledge 原本領域                 /incoming 登録候補
 ```
 
-`~/.local/bin`が`PATH`に含まれていることを確認してから、次を実行します。
+読み取りMCPと登録MCPは、同じPythonパッケージとDockerイメージを共有し、別サービスとして起動します。
 
-```bash
-kb-index --help
-```
-
-ソース修正後に再インストールする場合：
-
-```bash
-uv tool install --force .
-```
-
-開発中はインストールせずに実行することもできます。
-
-```bash
-uv run src/kb_index.py --shared examples
-```
-
-`pyproject.toml`にコマンドが登録済みなら、次でも実行できます。
-
-```bash
-uv run kb-index --shared examples
-```
-
-## 1.2 システム全体へのインストール
-
-まず一般ユーザーでwheelを作成します。
-
-```bash
-rm -rf build dist src/*.egg-info
-uv build
-```
-
-全ユーザーが使えるようにインストールします。
-
-```bash
-sudo mkdir -p /opt/uv-tools /usr/local/bin
-
-sudo env \
-  UV_TOOL_DIR=/opt/uv-tools \
-  UV_TOOL_BIN_DIR=/usr/local/bin \
-  uv tool install --force dist/*.whl
-```
-
-確認：
-
-```bash
-which kb-index
-kb-index --help
-```
-
-想定される実行ファイル：
+## Collection名
 
 ```text
-/usr/local/bin/kb-index
+共有: shared_<project-id>
+個人: private_<owner>_<project-id>
 ```
 
-アンインストール：
+各ユーザーは、共有ナレッジと本人の個人ナレッジを検索する運用を想定しています。初期版ではownerの本人確認や認証は実装していないため、MCPはlocalhostまたは信頼できる内部ネットワークだけに公開してください。
+
+## 対応ファイル
+
+- Markdown: `.md`, `.markdown`
+- テキスト・設定: `.txt`, `.rst`, `.yaml`, `.yml`, `.json`, `.csv`, `.toml`, `.ini`, `.cfg`, `.tex`
+- ソースコード: Python、JavaScript、TypeScript、Java、C/C++、C#、Go、Rust、Ruby、PHP
+- 文書: PDF、DOCX、PPTX
+
+## インストール
+
+### 開発環境・ホストCLI
+
+リポジトリを取得した後、プロジェクト環境を同期します。
 
 ```bash
-sudo env \
-  UV_TOOL_DIR=/opt/uv-tools \
-  UV_TOOL_BIN_DIR=/usr/local/bin \
-  uv tool uninstall filesystem-knowledge-bridge
+uv sync
 ```
 
-アンインストール時に指定するのは、実行コマンド名ではなく`pyproject.toml`のパッケージ名です。
+CLIは`uv run`経由で実行します。
 
-# 2. CLIの設定
+```bash
+uv run kb-index --help
+uv run kb-search --help
+```
 
-`kb-index`は次の環境変数を参照します。
+依存ライブラリを追加する場合は、`pyproject.toml`を直接編集せず`uv add`を使用します。
+
+```bash
+uv add <package-name>
+```
+
+## 環境変数
 
 ```dotenv
 QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=
-
 LITELLM_API_BASE=http://localhost:4000/v1
-LITELLM_API_KEY=LiteLLMへ接続するキー
+LITELLM_API_KEY=
 EMBEDDING_MODEL=lab-embedding
-
 KNOWLEDGE_LOGICAL_ROOT=labknowledge://
 ```
 
-LiteLLMを1つのMaster Keyで運用している場合：
+登録時と検索時には同じEmbeddingモデルを使用してください。
 
-```bash
-export LITELLM_API_KEY="$LITELLM_MASTER_KEY"
-```
+## CLIで登録
 
-ホスト側CLIからLiteLLMとQdrantへ到達できる必要があります。
-
-## 基本的な使い方
+共有ナレッジ:
 
 ```bash
 kb-index --shared /path/to/project
-kb-index /path/to/project
+```
+
+個人ナレッジ:
+
+```bash
 kb-index --owner alice /path/to/project
-kb-index --project-id stable-project-id /path/to/project
-kb-index --collection curated_project /path/to/project
-kb-index --shared --dry-run /path/to/project
 ```
 
-既定のCollection名：
+再登録時は既存Collectionを削除して再構築します。原本ファイルは変更・削除しません。
 
-```text
-shared_<project-id>
-private_<owner>_<project-id>
+## CLIで検索
+
+共有ナレッジのみ:
+
+```bash
+kb-search "MCPサーバの構成"
 ```
 
-# 3. システム全体の構築
+共有＋個人ナレッジ:
 
-最小の常駐構成は、Open WebUI、LiteLLM、Qdrant、BGE-M3を動かすTEIの4サービスです。インデクサは常駐させる必要はありません。
+```bash
+kb-search --owner alice "MCPサーバの構成"
+```
 
-## 3.1 `.env`
+プロジェクト限定:
+
+```bash
+kb-search --owner alice \
+  --project filesystem-knowledge-bridge \
+  "登録方法"
+```
+
+## Docker Compose
+
+`.env.example`を`.env`へコピーし、Knowledge領域を設定します。
 
 ```dotenv
-COMPOSE_PROJECT_NAME=lab-ai
-
-OPENWEBUI_PORT=3000
-WEBUI_SECRET_KEY=十分に長いランダム文字列へ変更
-ENABLE_SIGNUP=true
-RAG_TOP_K=5
-
-LITELLM_PORT=4000
-LITELLM_MASTER_KEY=十分に強いキーへ変更
-
-OPENAI_API_KEY=
-GEMINI_API_KEY=
-ANTHROPIC_API_KEY=
-
-EMBEDDING_MODEL=lab-embedding
-
-QDRANT_HTTP_PORT=6333
-QDRANT_API_KEY=
-
-KNOWLEDGE_LOGICAL_ROOT=labknowledge://
+KNOWLEDGE_HOST_ROOT=/mnt/knowledge
+KNOWLEDGE_INCOMING_HOST_ROOT=/mnt/knowledge-incoming
 ```
 
-`.env`はGitへ登録しません。
-
-```gitignore
-.env
-open-webui/
-```
-
-## 3.2 `docker-compose.yml`
-
-```yaml
-services:
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.10.2
-    container_name: open-webui
-    ports:
-      - "${OPENWEBUI_PORT:-3000}:8080"
-    volumes:
-      - ./open-webui:/app/backend/data
-    environment:
-      OPENAI_API_BASE_URL: http://litellm:4000/v1
-      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
-
-      RAG_EMBEDDING_ENGINE: openai
-      RAG_OPENAI_API_BASE_URL: http://litellm:4000/v1
-      RAG_OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
-      RAG_EMBEDDING_MODEL: ${EMBEDDING_MODEL}
-      RAG_TOP_K: ${RAG_TOP_K:-5}
-
-      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
-      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
-    depends_on:
-      - litellm
-      - qdrant
-    restart: unless-stopped
-
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    container_name: litellm
-    env_file:
-      - .env
-    volumes:
-      - ./litellm/config.yaml:/app/config.yaml:ro
-    command:
-      - "--config=/app/config.yaml"
-    ports:
-      - "127.0.0.1:${LITELLM_PORT:-4000}:4000"
-    restart: unless-stopped
-
-  tei:
-    image: ghcr.io/huggingface/text-embeddings-inference:latest
-    container_name: tei
-    command:
-      - --model-id
-      - BAAI/bge-m3
-    volumes:
-      - hf_cache:/data
-    restart: unless-stopped
-
-  qdrant:
-    image: qdrant/qdrant:v1.17.0
-    container_name: qdrant
-    ports:
-      - "127.0.0.1:${QDRANT_HTTP_PORT:-6333}:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    restart: unless-stopped
-
-volumes:
-  qdrant_data:
-  hf_cache:
-```
-
-利用者へ公開する必要があるのはOpen WebUIだけです。上の例では、ホスト側の`kb-index`から利用するため、LiteLLMとQdrantをlocalhostにだけ公開しています。TEIはホストへ公開していません。
-
-## 3.3 LiteLLMの`config.yaml`
-
-```yaml
-model_list:
-  - model_name: lab-embedding
-    litellm_params:
-      model: openai/BAAI/bge-m3
-      api_base: http://tei:80/v1
-      api_key: dummy
-      mode: embedding
-      encoding_format: float
-
-general_settings:
-  master_key: os.environ/LITELLM_MASTER_KEY
-```
-
-通常のチャットモデルも、必要に応じて同じ`model_list`へ追加します。
-
-## 3.4 起動と確認
+MCPサービスだけをビルド・起動する場合:
 
 ```bash
-docker compose up -d
-docker compose ps
+docker compose -f docker-compose.yml.example up -d --build \
+  knowledge-read-mcp knowledge-register-mcp
 ```
 
-LiteLLMのモデル一覧：
+接続先:
 
-```bash
-curl http://localhost:4000/v1/models \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+```text
+Read MCP:     http://localhost:8000/mcp
+Register MCP: http://localhost:8001/mcp
 ```
 
-Embedding確認：
+## Read MCP
 
-```bash
-curl http://localhost:4000/v1/embeddings \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "lab-embedding",
-    "input": "テスト用の文章",
-    "encoding_format": "float"
-  }'
-```
+### `search_knowledge`
 
-Qdrant確認：
-
-```bash
-curl http://localhost:6333/collections
-```
-
-# 4. プロジェクトの登録
-
-```bash
-export QDRANT_URL=http://localhost:6333
-export LITELLM_API_BASE=http://localhost:4000/v1
-export LITELLM_API_KEY="$LITELLM_MASTER_KEY"
-export EMBEDDING_MODEL=lab-embedding
-
-kb-index --shared examples
-```
-
-このコマンドは、対応ファイルの探索、パース・チャンク分割、LiteLLM経由のEmbedding生成、Collectionの再作成、Open WebUI向けpayloadの保存を行います。
-
-登録内容を1件確認：
-
-```bash
-curl http://localhost:6333/collections/shared_examples/points/scroll \
-  -H "Content-Type: application/json" \
-  -d '{
-    "limit": 1,
-    "with_payload": true,
-    "with_vector": false
-  }'
-```
-
-payloadには次のような項目が含まれます。
+共有ナレッジと、owner指定時はその個人ナレッジを検索します。
 
 ```json
 {
-  "text": "チャンク本文",
-  "metadata": {
-    "scope": "shared",
-    "owner": "shared",
-    "project_id": "examples",
-    "relative_path": "sample_project/docs/setup.md",
-    "file_name": "setup.md",
-    "chunk_index": 1
-  }
+  "query": "Qdrantの設定",
+  "owner": "alice",
+  "projects": ["filesystem-knowledge-bridge"],
+  "limit": 5
 }
 ```
 
-# 5. Open WebUIのExternal Knowledge Sourcesから利用する
+`projects`を省略すると、参照可能なCollectionを横断検索し、全体上位だけを返します。
 
-## 5.1 Embedding設定を確認する
+### `list_knowledge_projects`
 
-```text
-管理者パネル
-→ 設定
-→ ドキュメント
-→ 埋め込み
-```
+参照可能なプロジェクトを一覧表示します。
 
-設定例：
+### `read_knowledge_source`
 
-```text
-埋め込みモデルエンジン: OpenAI
-API Base URL: http://litellm:4000/v1
-埋め込みモデル: lab-embedding
-```
+検索チャンクだけでは前後関係が不足する場合に、テキスト形式の原本を行範囲付きで参照します。通常検索で自動的に原本全文を返すことはありません。
 
-Open WebUIが検索クエリに使うEmbeddingモデルは、`kb-index`が登録時に使ったモデルと一致させる必要があります。
+## Register MCP
 
-## 5.2 External Knowledge Sourceを追加する
+登録候補は、SMBなどで次へ事前配置します。
 
 ```text
-管理者パネル
-→ 設定
-→ 連携
-→ External Knowledge Sources
-→ Add Knowledge Connection
+/incoming/users/<owner>/<project>/
 ```
 
-設定例：
+### `list_incoming`
+
+ownerのincomingにある登録候補を一覧表示します。
+
+### `register_incoming_project`
+
+incomingのプロジェクトを次へコピーし、個人Knowledgeとして登録します。
 
 ```text
-名前: Curated Knowledge
-Provider: Qdrant
-Endpoint: http://qdrant:6333
-API Key / Token: Qdrant認証を使わない場合は空欄
-
-コレクション: shared_examples
-Content Field: payload.text
-Vector Field: デフォルト
-Metadata Field: payload.metadata
-Document ID Field: id
+/knowledge/users/<owner>/<project>/
 ```
 
-Test Queryへ次のような質問を入力します。
+- incoming原本を削除・移動しません
+- 保存済み同名原本を自動上書きしません
+- 同名原本がある場合はエラーを返します
+- 登録処理は同時に1件だけ実行します
+- Qdrant登録失敗後も保存済み原本は残ります
+
+### `reindex_stored_project`
+
+保存済み原本からQdrant Collectionを削除・再構築します。原本は変更しません。
+
+## 原本領域
 
 ```text
-Pythonの必要バージョンは何ですか？
+/knowledge/
+├── shared/<project>/
+└── users/<owner>/<project>/
+
+/incoming/
+└── users/<owner>/<project>/
 ```
 
-`Test Succeeded`と表示されることを確認してから接続を作成します。
+読み取りMCPでは`/knowledge`を読み取り専用でマウントします。登録MCPだけが保存先`/knowledge`への書き込み権限を持ち、`/incoming`は読み取り専用で参照します。
 
-## 5.3 チャットで利用する
+## MCPテスト
 
-作成したKnowledge Connectionをモデルまたはチャットへ付け、次のような質問をします。
+詳しい手順は[MCP_TEST.ja.md](MCP_TEST.ja.md)を参照してください。
+
+## ライセンス
+
+MIT License
+
+
+### Open WebUIなど別コンテナから接続する場合
+
+MCPのHTTP transportはHostヘッダーを検証します。Dockerサービス名を変更した場合は、`.env` の許可ホストも合わせて変更してください。
+
+```dotenv
+KNOWLEDGE_READ_MCP_ALLOWED_HOSTS=knowledge-read-mcp:8000,localhost:8000,127.0.0.1:8000
+KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS=knowledge-register-mcp:8001,localhost:8001,127.0.0.1:8001
+```
+
+設定値はComposeから各コンテナの `MCP_ALLOWED_HOSTS` へ渡されます。サービス名はPythonソースには固定していません。
+
+## Open WebUIからZIPをアップロードして登録する
+
+v0.3.0では、ZIPを`incoming`へ配置するだけの`knowledge-upload-api`を追加しています。
+Uploaderは登録やインデックス作成を行いません。Open WebUIの登録専用モデルが、次の2つのToolを順に呼び出します。
 
 ```text
-Pythonの必要バージョンは何ですか？
-main.pyは何をするプログラムですか？
+添付ZIPあり:
+  Knowledge Project Uploader.upload_project
+    → Knowledge Register.register_incoming_project
+
+添付ZIPなし:
+  Knowledge Register.register_incoming_project
 ```
 
-正常に動作していれば、登録したプロジェクトの内容に基づく回答とSource表示を確認できます。
+Open WebUI用Workspace Toolの例は`openwebui/knowledge_uploader_tool.py`、設定・試験手順は`UPLOAD_TEST.ja.md`を参照してください。
 
-# 対応ファイル形式
+## project名とproject_id
 
-- Markdown：`.md`、`.markdown`
-- テキスト・構造化テキスト：`.txt`、`.rst`、`.yaml`、`.yml`、`.json`、`.csv`、`.toml`、`.ini`、`.cfg`、`.tex`
-- ソースコード：Python、JavaScript、TypeScript、Java、C/C++、C#、Go、Rust、Ruby、PHP
-- 文書：PDF、DOCX、PPTX
+`project` と `project_id` は役割を分離しています。
 
-# 設計方針
+- `project`: ユーザーが指定する表示名・保存フォルダ名。日本語を含めてそのまま保持します。
+- `project_id`: Qdrant Collectionやmetadataで使用する内部UUIDです。
 
-- 既存コンポーネントを可能な限りそのまま利用する
-- 必要になるまで独自検索サーバを作らない
-- 登録処理と検索処理を分離する
-- プロジェクト構造と原本情報をmetadataとして保持する
-- 差分更新を先回りして実装せず、当面は全置換で運用する
-- MCPや登録Toolを追加する前に、現在動作しているIndexerを安定させる
+通常、利用者は `project_id` を指定しません。初回登録時にRegister MCPがUUIDv4を生成し、保存済み原本直下の `.kb_project.json` に記録します。再インデックス時は同じUUIDを再利用します。
 
-# ライセンス
+```json
+{
+  "project": "引き継ぎ資料_2025年度_アリス",
+  "project_id": "0c596ad3-4eb4-4699-ae14-f6e2e5c59c7d",
+  "owner": "alice",
+  "scope": "personal"
+}
+```
 
-MIT
+検索時の `projects` には、表示名またはUUIDのどちらでも指定できます。

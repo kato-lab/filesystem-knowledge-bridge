@@ -143,6 +143,83 @@ services:
     restart: unless-stopped
 
 
+  # ===========================================================================
+  # Knowledge Read MCP
+  # ===========================================================================
+  knowledge-read-mcp:
+    build: .
+    command: kb-read-mcp
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_READ_MCP_PORT:-8000}:8000"
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      LITELLM_API_BASE: http://litellm:4000/v1
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      KNOWLEDGE_ROOT: /knowledge
+      KNOWLEDGE_LOGICAL_ROOT: ${KNOWLEDGE_LOGICAL_ROOT:-labknowledge://}
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+      MCP_ALLOWED_HOSTS: ${KNOWLEDGE_READ_MCP_ALLOWED_HOSTS:-knowledge-read-mcp:8000,localhost:8000,127.0.0.1:8000}
+    volumes:
+      - ${KNOWLEDGE_HOST_ROOT:-/mnt/knowledge}:/knowledge:ro
+    depends_on:
+      - qdrant
+      - litellm
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Knowledge Register MCP
+  # ===========================================================================
+  knowledge-register-mcp:
+    build: .
+    command: kb-register-mcp
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_REGISTER_MCP_PORT:-8001}:8001"
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      LITELLM_API_BASE: http://litellm:4000/v1
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      KNOWLEDGE_ROOT: /knowledge
+      INCOMING_ROOT: /incoming
+      KNOWLEDGE_LOGICAL_ROOT: ${KNOWLEDGE_LOGICAL_ROOT:-labknowledge://}
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8001
+      MCP_ALLOWED_HOSTS: ${KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS:-knowledge-register-mcp:8001,localhost:8001,127.0.0.1:8001}
+    volumes:
+      - ${KNOWLEDGE_HOST_ROOT:-/mnt/knowledge}:/knowledge:rw
+      - ${INCOMING_HOST_PATH:-/mnt/knowledge-incoming}:/incoming:ro
+    depends_on:
+      - qdrant
+      - litellm
+    restart: unless-stopped
+
+
+  # ===========================================================================
+  # Knowledge Upload API
+  #
+  # ZIPを受け取り、incomingへ安全に展開するだけのサービス。
+  # 登録・インデックス作成はKnowledge Register MCPが担当する。
+  # ===========================================================================
+  knowledge-upload-api:
+    build: .
+    command: kb-upload-api
+    ports:
+      - "127.0.0.1:${KNOWLEDGE_UPLOAD_API_PORT:-8002}:8002"
+    environment:
+      INCOMING_ROOT: /incoming
+      UPLOAD_HOST: 0.0.0.0
+      UPLOAD_PORT: 8002
+      UPLOAD_MAX_BYTES: ${KNOWLEDGE_UPLOAD_MAX_BYTES:-536870912}
+      UPLOAD_MAX_EXTRACTED_BYTES: ${KNOWLEDGE_UPLOAD_MAX_EXTRACTED_BYTES:-2147483648}
+      UPLOAD_MAX_FILES: ${KNOWLEDGE_UPLOAD_MAX_FILES:-20000}
+    volumes:
+      - ${INCOMING_HOST_PATH:-/mnt/knowledge-incoming}:/incoming:rw
+    restart: unless-stopped
+
 # =============================================================================
 # Docker Composeのボリューム定義
 # =============================================================================
