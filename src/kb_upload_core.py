@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from kb_common import INCOMING_ROOT, resolve_under, sanitize_identifier
+from kb_project_metadata import validate_project_name
 
 UPLOAD_MAX_BYTES = int(os.environ.get("UPLOAD_MAX_BYTES", str(512 * 1024 * 1024)))
 UPLOAD_MAX_EXTRACTED_BYTES = int(
@@ -18,10 +19,7 @@ UPLOAD_MAX_FILES = int(os.environ.get("UPLOAD_MAX_FILES", "20000"))
 
 
 def _project_name(value: str) -> str:
-    name = Path(value).name
-    if name != value or value in {"", ".", ".."}:
-        raise ValueError("不正なproject名です")
-    return sanitize_identifier(name)
+    return validate_project_name(value)
 
 
 def _is_symlink(info: zipfile.ZipInfo) -> bool:
@@ -64,7 +62,7 @@ def upload_project_archive(
     original_filename: str,
 ) -> dict[str, Any]:
     owner_id = sanitize_identifier(owner)
-    project_id = _project_name(project)
+    project_name = _project_name(project)
 
     if not archive_path.is_file():
         raise FileNotFoundError("アップロードされたファイルが見つかりません")
@@ -73,7 +71,7 @@ def upload_project_archive(
     if not zipfile.is_zipfile(archive_path):
         raise ValueError("ZIP形式のファイルを指定してください")
 
-    destination = resolve_under(INCOMING_ROOT, "users", owner_id, project_id)
+    destination = resolve_under(INCOMING_ROOT, "users", owner_id, project_name)
     if destination.exists():
         raise FileExistsError("incomingに同名projectが存在します。自動上書きは行いません")
 
@@ -99,7 +97,7 @@ def upload_project_archive(
         "status": "uploaded",
         "source_preserved": True,
         "owner": owner_id,
-        "project": project_id,
+        "project": project_name,
         "filename": Path(original_filename).name,
         "incoming_path": str(destination),
     }

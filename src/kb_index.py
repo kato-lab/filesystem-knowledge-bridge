@@ -20,6 +20,8 @@ from kb_common import (
 )
 from uuid import NAMESPACE_URL, uuid5
 
+from kb_project_metadata import normalize_project_id, validate_project_name
+
 TEXT_EXTENSIONS = {".txt", ".rst", ".yaml", ".yml", ".json", ".csv", ".toml", ".ini", ".cfg", ".tex"}
 MARKDOWN_EXTENSIONS = {".md", ".markdown"}
 CODE_LANGUAGES = {
@@ -44,7 +46,7 @@ def common_metadata(path: Path, target_dir: Path, project_id: str, project_name:
         "project_id": project_id,
         "project_name": project_name,
         "relative_path": relative_path,
-        "logical_path": logical_path_for(relative_path, project_id, shared, owner),
+        "logical_path": logical_path_for(relative_path, project_name, shared, owner),
         "file_name": path.name,
         "file_extension": path.suffix.lower(),
         "top_directory": parts[0] if len(parts) > 1 else "",
@@ -221,7 +223,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("dir", type=Path, help="Knowledge化するプロジェクトフォルダ")
     parser.add_argument("--shared", action="store_true", help="共有Knowledgeとして登録")
     parser.add_argument("--owner", help="個人Knowledgeのowner。省略時はOSユーザ")
-    parser.add_argument("--project-id", help="安定したproject識別子。省略時はフォルダ名")
+    parser.add_argument("--project-id", help="内部UUID。省略時はUUIDv4を自動生成")
     parser.add_argument("--collection", help="Qdrant collection名。省略時はscope/owner/project-idから自動生成")
     parser.add_argument("--dry-run", action="store_true", help="Qdrantへ登録せずmetadataを確認")
     return parser.parse_args()
@@ -235,6 +237,7 @@ def index_directory(
     shared: bool = False,
     owner: str | None = None,
     project_id: str | None = None,
+    project_name: str | None = None,
     collection: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, object]:
@@ -244,8 +247,8 @@ def index_directory(
     if not target_dir.is_dir():
         raise FileNotFoundError(f"フォルダが見つかりません: {target_dir}")
 
-    project_name = target_dir.name
-    normalized_project_id = sanitize_identifier(project_id or project_name)
+    display_project_name = validate_project_name(project_name or target_dir.name)
+    normalized_project_id = normalize_project_id(project_id)
     normalized_owner = sanitize_identifier(owner or getpass.getuser() or "unknown")
     collection_name = (
         sanitize_identifier(collection)
@@ -254,12 +257,12 @@ def index_directory(
     )
 
     print(f"🚀 {'共有' if shared else '個人'} Knowledgeを登録します")
-    print(f"   project: {project_name} ({normalized_project_id})")
+    print(f"   project: {display_project_name} ({normalized_project_id})")
     print(f"   source: {target_dir}")
     print(f"   collection: {collection_name}")
 
     configure_embedding()
-    nodes = build_nodes(target_dir, normalized_project_id, project_name, shared, normalized_owner)
+    nodes = build_nodes(target_dir, normalized_project_id, display_project_name, shared, normalized_owner)
     if not nodes:
         raise RuntimeError("nodeが生成されませんでした")
 
@@ -275,7 +278,7 @@ def index_directory(
         print(f"✨ 登録完了: {collection_name}")
 
     return {
-        "project": project_name,
+        "project": display_project_name,
         "project_id": normalized_project_id,
         "owner": "shared" if shared else normalized_owner,
         "scope": "shared" if shared else "personal",

@@ -20,3 +20,11 @@ v0.1.0のIndexerを起点に、同じPythonパッケージとDockerイメージ�
 - Dockerイメージ内の環境構築: `uv sync --no-dev`
 
 `uv pip`や`pip install`は使用しません。`uv.lock`を生成・更新できる環境では、Dockerfileの同期コマンドを`uv sync --frozen --no-dev`へ変更できます。
+
+## project / project_id 分離
+
+- Uploaderは`project`を加工せず、同名のincomingディレクトリへ展開するだけです。
+- Registerは`project_id`未指定時にUUIDv4を生成します。
+- 保存済み原本直下の`.kb_project.json`に表示名とUUIDを保存します。
+- Reindexは`.kb_project.json`のUUIDを再利用します。
+- Qdrant Collection名とlogical_idにはUUIDを使い、logical_pathと表示にはproject名を使います。

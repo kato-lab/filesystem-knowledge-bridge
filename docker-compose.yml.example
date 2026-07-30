@@ -191,7 +191,7 @@ services:
       MCP_ALLOWED_HOSTS: ${KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS:-knowledge-register-mcp:8001,localhost:8001,127.0.0.1:8001}
     volumes:
       - ${KNOWLEDGE_HOST_ROOT:-/mnt/knowledge}:/knowledge:rw
-      - ${KNOWLEDGE_INCOMING_HOST_ROOT:-/mnt/knowledge-incoming}:/incoming:ro
+      - ${INCOMING_HOST_PATH:-/mnt/knowledge-incoming}:/incoming:ro
     depends_on:
       - qdrant
       - litellm
@@ -217,7 +217,7 @@ services:
       UPLOAD_MAX_EXTRACTED_BYTES: ${KNOWLEDGE_UPLOAD_MAX_EXTRACTED_BYTES:-2147483648}
       UPLOAD_MAX_FILES: ${KNOWLEDGE_UPLOAD_MAX_FILES:-20000}
     volumes:
-      - ${KNOWLEDGE_INCOMING_HOST_ROOT:-/mnt/knowledge-incoming}:/incoming:rw
+      - ${INCOMING_HOST_PATH:-/mnt/knowledge-incoming}:/incoming:rw
     restart: unless-stopped
 
 # =============================================================================

@@ -204,3 +204,14 @@ Without an attachment:
 ```
 
 See `openwebui/knowledge_uploader_tool.py` for the Workspace Tool example and `UPLOAD_TEST.ja.md` for setup and test steps.
+
+## Project names and project IDs
+
+`project` and `project_id` have separate roles.
+
+- `project`: The user-facing name and stored folder name. Unicode names are preserved.
+- `project_id`: An internal UUID used for Qdrant collections and metadata.
+
+Users normally omit `project_id`. Register MCP generates a UUIDv4 during the first registration and stores it in `.kb_project.json` under the saved project directory. Reindexing reuses the same UUID.
+
+Search `projects` may contain either a display name or a UUID.

@@ -350,3 +350,20 @@ uv run python scripts/mcp_test.py register \
 - 検索結果の相対パスから原本を範囲指定で参照できる
 - 保存済み原本から再インデックスできる
 - 同名原本を自動上書きしない
+
+## UUID project_id の確認
+
+新規登録結果で、`project`が指定した表示名のまま、`project_id`がUUIDになっていることを確認します。
+
+```text
+project:    引き継ぎ資料_2025年度_末永栞奈
+project_id: 0c596ad3-4eb4-4699-ae14-f6e2e5c59c7d
+```
+
+保存済み原本の `.kb_project.json` も確認します。
+
+```bash
+cat '/mnt/knowledge/users/tkato/引き継ぎ資料_2025年度_末永栞奈/.kb_project.json'
+```
+
+再インデックス後も同じ`project_id`とCollection名が返ることを確認してください。

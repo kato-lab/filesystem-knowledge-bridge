@@ -157,3 +157,18 @@ sample-project-incomingを登録してください
 - incomingの同名projectは自動上書きしません。
 - ZIP Slipとなるパス、シンボリックリンク、サイズ・ファイル数上限超過は拒否します。
 - Open WebUIのユーザーemailの`@`より前をownerとして使用します。
+
+## 日本語project名の確認
+
+```bash
+curl -i -X POST http://localhost:8002/uploads/projects \
+  -F owner=tkato \
+  -F 'project=引き継ぎ資料_2025年度_末永栞奈' \
+  -F archive=@handover.zip
+```
+
+期待結果:
+
+- incomingフォルダ名が`引き継ぎ資料_2025年度_末永栞奈`のまま保持される
+- Uploaderは`project_id`を生成しない
+- 続くRegister MCP呼び出しでUUIDの`project_id`が生成される

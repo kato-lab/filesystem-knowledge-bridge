@@ -23,7 +23,11 @@ def list_incoming(owner: str):
 
 @mcp.tool()
 def register_incoming_project(owner: str, project: str, project_id: str | None = None):
-    """incomingに配置済みのprojectを原本領域へコピーし、個人Knowledgeとして登録します。incoming原本は削除しません。"""
+    """incomingに配置済みのprojectを原本領域へコピーし、個人Knowledgeとして登録します。
+
+    projectはユーザー向けの名前です。project_idは内部UUIDで、通常は省略してください。
+    省略時はRegister側でUUIDv4を生成します。incoming原本は削除しません。
+    """
     from kb_register_core import register_incoming_project as register
 
     return register(owner, project, project_id)
@@ -31,7 +35,11 @@ def register_incoming_project(owner: str, project: str, project_id: str | None =
 
 @mcp.tool()
 def reindex_stored_project(owner: str, project: str, project_id: str | None = None):
-    """保存済み原本からQdrant Collectionを削除・再構築します。原本は変更しません。"""
+    """保存済み原本からQdrant Collectionを削除・再構築します。
+
+    保存済みの.kb_project.jsonから同じproject_idを再利用します。
+    通常はproject_idを省略してください。原本は変更しません。
+    """
     from kb_register_core import reindex_stored_project as reindex
 
     return reindex(owner, project, project_id)

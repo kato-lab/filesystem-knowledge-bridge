@@ -47,22 +47,21 @@ def list_allowed_collections(client: QdrantClient, owner: str | None) -> list[st
     return sorted(set(allowed))
 
 
-def filter_projects(collections: list[str], projects: list[str] | None, owner: str | None) -> list[str]:
+def filter_projects(
+    client: QdrantClient,
+    collections: list[str],
+    projects: list[str] | None,
+) -> list[str]:
     if not projects:
         return collections
-    project_ids = {sanitize_identifier(project) for project in projects}
-    owner_prefix = f"private_{sanitize_identifier(owner)}_" if owner else ""
-    selected = []
-    for collection in collections:
-        if collection.startswith("shared_"):
-            project_id = collection.removeprefix("shared_")
-        elif owner_prefix and collection.startswith(owner_prefix):
-            project_id = collection.removeprefix(owner_prefix)
-        else:
-            continue
-        if project_id in project_ids:
-            selected.append(collection)
-    return selected
+    requested = {project.strip() for project in projects if project.strip()}
+    if not requested:
+        return collections
+    return [
+        collection
+        for collection in collections
+        if _project_matches(_collection_project_info(client, collection), requested)
+    ]
 
 
 def _metadata_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -103,6 +102,51 @@ def _text_from_payload(payload: dict[str, Any]) -> str:
     return ""
 
 
+def _collection_project_info(client: QdrantClient, collection: str) -> dict[str, str]:
+    """Collection内のmetadataから人間向けproject名と内部IDを取得する。"""
+    project_id = ""
+    project_name = ""
+    metadata_owner = ""
+    metadata_scope = ""
+    try:
+        points, _ = client.scroll(
+            collection_name=collection,
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if points:
+            metadata = _metadata_from_payload(points[0].payload or {})
+            project_id = str(metadata.get("project_id") or "")
+            project_name = str(metadata.get("project_name") or "")
+            metadata_owner = str(metadata.get("owner") or "")
+            metadata_scope = str(metadata.get("scope") or "")
+    except Exception:
+        # 一覧取得時は壊れたCollectionが1件あっても全体を止めない。
+        pass
+
+    if collection.startswith("shared_"):
+        scope = "shared"
+        owner = "shared"
+        fallback_id = collection.removeprefix("shared_")
+    else:
+        scope = "personal"
+        remainder = collection.removeprefix("private_")
+        owner, _, fallback_id = remainder.partition("_")
+
+    return {
+        "scope": metadata_scope or scope,
+        "owner": metadata_owner or owner,
+        "project_id": project_id or fallback_id,
+        "project_name": project_name or project_id or fallback_id,
+        "collection": collection,
+    }
+
+
+def _project_matches(info: dict[str, str], requested: set[str]) -> bool:
+    return info["project_id"] in requested or info["project_name"] in requested
+
+
 def search_knowledge(
     query: str,
     *,
@@ -114,7 +158,7 @@ def search_knowledge(
         raise ValueError("queryが空です")
     limit = max(1, min(limit, 10))
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-    collections = filter_projects(list_allowed_collections(client, owner), projects, owner)
+    collections = filter_projects(client, list_allowed_collections(client, owner), projects)
     if not collections:
         return []
 
@@ -151,14 +195,10 @@ def search_knowledge(
 
 def list_knowledge_projects(owner: str | None = None) -> list[dict[str, str]]:
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-    projects: list[dict[str, str]] = []
-    owner_id = sanitize_identifier(owner) if owner else None
-    for collection in list_allowed_collections(client, owner):
-        if collection.startswith("shared_"):
-            projects.append({"scope": "shared", "owner": "shared", "project_id": collection.removeprefix("shared_"), "collection": collection})
-        elif owner_id and collection.startswith(f"private_{owner_id}_"):
-            projects.append({"scope": "personal", "owner": owner_id, "project_id": collection.removeprefix(f"private_{owner_id}_"), "collection": collection})
-    return projects
+    return [
+        _collection_project_info(client, collection)
+        for collection in list_allowed_collections(client, owner)
+    ]
 
 
 def read_knowledge_source(

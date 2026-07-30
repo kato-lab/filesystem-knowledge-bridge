@@ -35,6 +35,7 @@ kb-upload-api = "kb_upload_api:main"
 [tool.setuptools]
 py-modules = [
     "kb_common",
+    "kb_project_metadata",
     "kb_index",
     "kb_search_core",
     "kb_search",

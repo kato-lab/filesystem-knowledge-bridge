@@ -265,3 +265,23 @@ Uploaderは登録やインデックス作成を行いません。Open WebUIの�
 ```
 
 Open WebUI用Workspace Toolの例は`openwebui/knowledge_uploader_tool.py`、設定・試験手順は`UPLOAD_TEST.ja.md`を参照してください。
+
+## project名とproject_id
+
+`project` と `project_id` は役割を分離しています。
+
+- `project`: ユーザーが指定する表示名・保存フォルダ名。日本語を含めてそのまま保持します。
+- `project_id`: Qdrant Collectionやmetadataで使用する内部UUIDです。
+
+通常、利用者は `project_id` を指定しません。初回登録時にRegister MCPがUUIDv4を生成し、保存済み原本直下の `.kb_project.json` に記録します。再インデックス時は同じUUIDを再利用します。
+
+```json
+{
+  "project": "引き継ぎ資料_2025年度_末永栞奈",
+  "project_id": "0c596ad3-4eb4-4699-ae14-f6e2e5c59c7d",
+  "owner": "tkato",
+  "scope": "personal"
+}
+```
+
+検索時の `projects` には、表示名またはUUIDのどちらでも指定できます。

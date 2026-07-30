@@ -9,7 +9,7 @@ requirements: httpx>=0.27
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import httpx
 from pydantic import BaseModel, Field
@@ -43,12 +43,12 @@ class Tools:
     def _owner(__user__: dict[str, Any] | None) -> str:
         if not __user__:
             raise ValueError("Open WebUIのユーザー情報を取得できません")
-        email = str(__user__.get("email") or "").strip()
-        if email and "@" in email:
-            return email.split("@", 1)[0]
         name = str(__user__.get("name") or "").strip()
         if name:
             return name
+        email = str(__user__.get("email") or "").strip()
+        if email and "@" in email:
+            return email.split("@", 1)[0]
         raise ValueError("ownerへ変換できるユーザー情報がありません")
 
     def _path(self, record: dict[str, Any]) -> Path:
@@ -63,7 +63,14 @@ class Tools:
 
     async def upload_project(
         self,
-        project: str = "",
+        project: Annotated[
+            str,
+            (
+                "ユーザーが指定したproject名を一字一句変更せず渡してください。"
+                "日本語、空白、アンダースコア、ハイフンを保持し、短縮・要約・翻訳しないでください。"
+                "未指定の場合だけ空文字列を渡してください。"
+            ),
+        ] = "",
         __files__: list[dict[str, Any]] | None = None,
         __user__: dict[str, Any] | None = None,
         __event_emitter__=None,
