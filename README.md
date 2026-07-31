@@ -192,7 +192,7 @@ Compose passes these values to each container as `MCP_ALLOWED_HOSTS`; service na
 
 ## Uploading and registering a ZIP from Open WebUI
 
-v0.3.0 adds `knowledge-upload-api`, which only receives a ZIP archive and places its extracted contents in `incoming`. It does not register or index the project. A registration-focused Open WebUI model calls the tools in sequence:
+v0.2.0 adds `knowledge-upload-api`, which only receives a ZIP archive and places its extracted contents in `incoming`. It does not register or index the project. A registration-focused Open WebUI model calls the tools in sequence:
 
 ```text
 With an attached ZIP:

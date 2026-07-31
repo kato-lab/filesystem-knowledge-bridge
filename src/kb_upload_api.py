@@ -12,7 +12,7 @@ from kb_upload_core import UPLOAD_MAX_BYTES, upload_project_archive
 app = FastAPI(
     title="filesystem-knowledge-bridge uploader",
     description="ZIP archiveをincomingへ配置するアップロード専用API。登録・インデックス作成は行いません。",
-    version="0.3.0",
+    version="0.2.0",
 )
 
 

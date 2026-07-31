@@ -28,3 +28,13 @@ v0.1.0のIndexerを起点に、同じPythonパッケージとDockerイメージ�
 - 保存済み原本直下の`.kb_project.json`に表示名とUUIDを保存します。
 - Reindexは`.kb_project.json`のUUIDを再利用します。
 - Qdrant Collection名とlogical_idにはUUIDを使い、logical_pathと表示にはproject名を使います。
+
+## Read MCPのowner解決
+
+Read MCPは次の優先順位でownerを解決します。
+
+1. Tool引数として明示された`owner`
+2. OpenWebUIの`X-OpenWebUI-User-Name`ヘッダー
+3. 未解決（sharedのみ）
+
+ownerが未解決でも処理は継続し、返却値に`owner_resolution`、`searched`、`hint`を含めます。これにより、LLMはsharedだけを対象にしたことを利用者へ説明できます。

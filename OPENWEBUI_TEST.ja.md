@@ -88,7 +88,7 @@ Knowledge Register
 
 事前に
 
-    incoming/users/tkato/sample-project2
+    incoming/users/alice/sample-project2
 
 を配置します。
 

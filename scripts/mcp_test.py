@@ -19,6 +19,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 DEFAULT_READ_URL = "http://localhost:8000/mcp"
 DEFAULT_REGISTER_URL = "http://localhost:8001/mcp"
+CLIENT_HEADERS: dict[str, str] = {}
 
 
 def to_jsonable(value: Any) -> Any:
@@ -40,7 +41,7 @@ async def with_session(
     url: str,
     callback: Callable[[ClientSession], Awaitable[Any]],
 ) -> Any:
-    async with streamable_http_client(url) as streams:
+    async with streamable_http_client(url, headers=CLIENT_HEADERS or None) as streams:
         read_stream, write_stream = streams[0], streams[1]
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
@@ -198,6 +199,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--read-url", default=DEFAULT_READ_URL)
     parser.add_argument("--register-url", default=DEFAULT_REGISTER_URL)
+    parser.add_argument(
+        "--forward-user-name",
+        help="OpenWebUI互換のX-OpenWebUI-User-Nameヘッダーを送信",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -249,6 +254,9 @@ def build_parser() -> argparse.ArgumentParser:
 async def async_main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.forward_user_name:
+        CLIENT_HEADERS["X-OpenWebUI-User-Name"] = args.forward_user_name
 
     commands = {
         "inspect": command_inspect,

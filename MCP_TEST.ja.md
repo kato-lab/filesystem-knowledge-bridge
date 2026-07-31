@@ -367,3 +367,70 @@ cat '/mnt/knowledge/users/alice/引き継ぎ資料_2025年度_アリス/.kb_proj
 ```
 
 再インデックス後も同じ`project_id`とCollection名が返ることを確認してください。
+
+## owner自動補完の確認
+
+Read MCPでは、Tool引数の`owner`が最優先です。`owner`を省略した場合は、現在はOpenWebUI互換の次のHTTPヘッダーからownerを補完します。
+
+```text
+X-OpenWebUI-User-Name: alice
+```
+
+テストクライアントから同じヘッダーを送る場合は、グローバルオプション`--forward-user-name`を使用します。
+
+```bash
+uv run python scripts/mcp_test.py \
+  --forward-user-name alice \
+  projects
+```
+
+検索も同様です。
+
+```bash
+uv run python scripts/mcp_test.py \
+  --forward-user-name alice \
+  search "Python" --limit 5
+```
+
+期待される返却には、次の情報が含まれます。
+
+```json
+{
+  "owner_resolution": {
+    "resolved": true,
+    "method": "openwebui_header",
+    "owner": "alice"
+  },
+  "searched": {
+    "shared": true,
+    "personal": true
+  },
+  "hint": null
+}
+```
+
+`owner`もヘッダーも指定しない場合はsharedだけを対象とし、結果に次のフラグとhintを含めます。
+
+```json
+{
+  "owner_resolution": {
+    "resolved": false,
+    "method": "none",
+    "owner": null
+  },
+  "searched": {
+    "shared": true,
+    "personal": false
+  },
+  "hint": "The current user could not be identified, so only shared Knowledge was used. ..."
+}
+```
+
+OpenWebUIから利用する場合は、OpenWebUI側でユーザー情報転送を有効にします。
+
+```yaml
+environment:
+  ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+```
+
+このヘッダーはOpenWebUI固有の補完機能です。他のMCPクライアントでは、必要に応じてTool引数`owner`を明示してください。

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "filesystem-knowledge-bridge"
-version = "0.3.0"
+version = "0.2.1"
 description = "Lightweight project knowledge indexer and MCP bridge for Qdrant"
 requires-python = ">=3.11"
 dependencies = [
@@ -35,6 +35,7 @@ kb-upload-api = "kb_upload_api:main"
 [tool.setuptools]
 py-modules = [
     "kb_common",
+    "kb_client_context",
     "kb_project_metadata",
     "kb_index",
     "kb_search_core",

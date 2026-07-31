@@ -252,7 +252,7 @@ KNOWLEDGE_REGISTER_MCP_ALLOWED_HOSTS=knowledge-register-mcp:8001,localhost:8001,
 
 ## Open WebUIからZIPをアップロードして登録する
 
-v0.3.0では、ZIPを`incoming`へ配置するだけの`knowledge-upload-api`を追加しています。
+v0.2.0では、ZIPを`incoming`へ配置するだけの`knowledge-upload-api`を追加しています。
 Uploaderは登録やインデックス作成を行いません。Open WebUIの登録専用モデルが、次の2つのToolを順に呼び出します。
 
 ```text
@@ -285,3 +285,108 @@ Open WebUI用Workspace Toolの例は`openwebui/knowledge_uploader_tool.py`、設
 ```
 
 検索時の `projects` には、表示名またはUUIDのどちらでも指定できます。
+
+
+
+# Qdrant インデックス削除手順
+現在のバージョンでは、登録したプロジェクトの削除方法がないので、削除する場合は手動で行います。
+まず、原本データは別途手動で削除したうえで、以下の手順でQdrantのインデックスを削除してください。
+
+> **注意**
+>
+> この操作では **QdrantのCollectionのみ削除**します。
+>
+> -   保存済み原本 (`knowledge`) は削除されません。
+> -   `incoming` は対象外です。
+> -   原本が残っているため、後から再インデックスできます。
+
+------------------------------------------------------------------------
+
+## 1. 登録済みCollection一覧を確認
+
+``` bash
+curl http://localhost:6333/collections
+```
+
+Docker Compose環境の場合
+
+``` bash
+sudo docker compose exec qdrant \
+  curl http://localhost:6333/collections
+```
+
+例
+
+``` json
+{
+  "result": {
+    "collections": [
+      {
+        "name": "private_tkato_3d2c9b72-f8c2-46d8-9f6d-xxxxxxxxxxxx"
+      },
+      {
+        "name": "shared_sample"
+      }
+    ]
+  }
+}
+```
+
+------------------------------------------------------------------------
+
+## 2. Collectionを削除
+
+``` bash
+curl -X DELETE \
+  http://localhost:6333/collections/private_tkato_3d2c9b72-f8c2-46d8-9f6d-xxxxxxxxxxxx
+```
+
+Docker Compose環境
+
+``` bash
+sudo docker compose exec qdrant \
+  curl -X DELETE \
+  http://localhost:6333/collections/private_tkato_3d2c9b72-f8c2-46d8-9f6d-xxxxxxxxxxxx
+```
+
+成功例
+
+``` json
+{
+  "result": true,
+  "status": "ok"
+}
+```
+
+------------------------------------------------------------------------
+
+## 3. 削除確認
+
+``` bash
+curl http://localhost:6333/collections
+```
+
+削除したCollectionが一覧から消えていれば完了です。
+
+------------------------------------------------------------------------
+
+## 再インデックス
+
+原本は削除されていないため、
+
+-   `reindex_stored_project`
+
+を実行すると同じ内容を再登録できます。
+
+------------------------------------------------------------------------
+
+## 今後の予定
+
+将来のバージョンでは、Collection名を意識せず
+
+    delete_project_index(
+        owner="alice",
+        project="データ解析演習"
+    )
+
+のように、ownerとproject名だけでQdrantインデックスを削除できるToolを追加予定です。
